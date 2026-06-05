@@ -19,7 +19,9 @@ DEFAULT_VOICE_NAME = "chatterbox:default:Default Voice-Neutral"
 DEFAULT_CARD_USERNAME = "u/throwaway_aita"
 CAPTION_FONT = "Montserrat-ExtraBold.ttf"
 MIN_VIDEO_SECONDS = 60.0  # TikTok monetization minimum
-TARGET_NARRATION_WORDS = 165  # ~60s of speech
+# Chatterbox narrates ~4 words/sec, so ~270 words ≈ 65s (margin over the 60s
+# minimum). Padding (min_video_duration) covers any shortfall.
+TARGET_NARRATION_WORDS = 270
 GAMEPLAY_PATH = ROOT_DIR / "gameplay" / "minecraft-parkour-1.mp4"
 
 

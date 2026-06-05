@@ -365,6 +365,26 @@ Generate a script for a video, depending on the subject of the video.
     return final_script.strip()
 
 
+def clean_generated_text(text: str) -> str:
+    """Strip reasoning-mode artifacts and markdown from an LLM response.
+
+    Reasoning models (e.g. qwen3) may emit ``<think>...</think>`` blocks or a
+    stray ``/think`` token. Removes those (without touching the normal word
+    "think"), drops markdown markers and wrapping quotes, and collapses
+    whitespace so the result is clean narration text.
+    """
+    if not text:
+        return ""
+    # Remove full thinking blocks, then any stray think tags / tokens.
+    text = re.sub(r"<think>.*?</think>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"</?think>", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"/think\b", " ", text, flags=re.IGNORECASE)
+    text = text.replace("*", "").replace("#", "")
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r'^["“]+|["”]+$', "", text).strip()
+    return text
+
+
 def expand_script(script: str, target_words: int = 165) -> str:
     """Expand a short first-person story to ~target_words for a longer narration.
 
@@ -401,9 +421,8 @@ Rewrite and expand the first-person story below to about {target_words} words so
     try:
         for i in range(_max_retries):
             response = _generate_response(prompt=prompt)
-            if response:
-                cleaned = response.replace("*", "").replace("#", "").strip()
-                cleaned = re.sub(r'^["“]|["”]$', "", cleaned).strip()
+            if response and "Error: " not in response:
+                cleaned = clean_generated_text(response)
                 if len(cleaned.split()) >= word_count:
                     logger.success(
                         f"expanded script from {word_count} to {len(cleaned.split())} words"
