@@ -12,7 +12,6 @@ from loguru import logger
 import numpy as np
 from moviepy import (
     AudioFileClip,
-    ColorClip,
     CompositeAudioClip,
     CompositeVideoClip,
     ImageClip,
@@ -71,6 +70,32 @@ class SubClippedVideoClip:
 
     def __str__(self):
         return f"SubClippedVideoClip(file_path={self.file_path}, start_time={self.start_time}, end_time={self.end_time}, duration={self.duration}, width={self.width}, height={self.height})"
+
+
+def calculate_cover_resize_and_crop(source_size: tuple[int, int], target_size: tuple[int, int]):
+    source_width, source_height = source_size
+    target_width, target_height = target_size
+
+    scale_factor = max(target_width / source_width, target_height / source_height)
+    scaled_width = max(target_width, round(source_width * scale_factor))
+    scaled_height = max(target_height, round(source_height * scale_factor))
+
+    x1 = max(0, (scaled_width - target_width) // 2)
+    y1 = max(0, (scaled_height - target_height) // 2)
+    x2 = x1 + target_width
+    y2 = y1 + target_height
+
+    return (scaled_width, scaled_height), (x1, y1, x2, y2)
+
+
+def resize_clip_to_cover(clip, target_width: int, target_height: int):
+    scaled_size, crop_box = calculate_cover_resize_and_crop(
+        source_size=clip.size,
+        target_size=(target_width, target_height),
+    )
+
+    x1, y1, x2, y2 = crop_box
+    return clip.resized(new_size=scaled_size).cropped(x1=x1, y1=y1, x2=x2, y2=y2)
 
 
 def close_clip(clip):
@@ -229,20 +254,7 @@ def combine_videos(
                     video_ratio = video_width / video_height
                     logger.debug(f"resizing clip, source: {clip_w}x{clip_h}, ratio: {clip_ratio:.2f}, target: {video_width}x{video_height}, ratio: {video_ratio:.2f}")
                     
-                    if clip_ratio == video_ratio:
-                        clip = clip.resized(new_size=(video_width, video_height))
-                    else:
-                        if clip_ratio > video_ratio:
-                            scale_factor = video_width / clip_w
-                        else:
-                            scale_factor = video_height / clip_h
-
-                        new_width = int(clip_w * scale_factor)
-                        new_height = int(clip_h * scale_factor)
-
-                        background = ColorClip(size=(video_width, video_height), color=(0, 0, 0)).with_duration(clip_duration)
-                        clip_resized = clip.resized(new_size=(new_width, new_height)).with_position("center")
-                        clip = CompositeVideoClip([background, clip_resized])
+                    clip = resize_clip_to_cover(clip, video_width, video_height)
                 
                 # Apply transitions if specified
                 if video_transition_mode and video_transition_mode.value != VideoTransitionMode.none.value:
@@ -329,20 +341,7 @@ def combine_videos(
                     video_ratio = video_width / video_height
                     logger.debug(f"resizing clip, source: {clip_w}x{clip_h}, ratio: {clip_ratio:.2f}, target: {video_width}x{video_height}, ratio: {video_ratio:.2f}")
                     
-                    if clip_ratio == video_ratio:
-                        clip = clip.resized(new_size=(video_width, video_height))
-                    else:
-                        if clip_ratio > video_ratio:
-                            scale_factor = video_width / clip_w
-                        else:
-                            scale_factor = video_height / clip_h
-
-                        new_width = int(clip_w * scale_factor)
-                        new_height = int(clip_h * scale_factor)
-
-                        background = ColorClip(size=(video_width, video_height), color=(0, 0, 0)).with_duration(clip_duration)
-                        clip_resized = clip.resized(new_size=(new_width, new_height)).with_position("center")
-                        clip = CompositeVideoClip([background, clip_resized])
+                    clip = resize_clip_to_cover(clip, video_width, video_height)
                         
                 shuffle_side = random.choice(["left", "right", "top", "bottom"])
                 if video_transition_mode and video_transition_mode.value == VideoTransitionMode.none.value:

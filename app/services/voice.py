@@ -2,7 +2,7 @@ import asyncio
 import os
 import re
 from datetime import datetime
-from typing import Union
+from typing import Any, Union
 from xml.sax.saxutils import unescape
 
 # Suppress warnings and handle CUDA library conflicts
@@ -45,6 +45,26 @@ except ImportError as e:
 # Global Chatterbox model instance
 chatterbox_model = None
 whisperx_model = None
+
+
+def configure_torch_safe_globals_for_whisperx():
+    """Allow WhisperX/Pyannote OmegaConf checkpoint metadata under PyTorch 2.6+."""
+    if not CHATTERBOX_AVAILABLE:
+        return
+
+    os.environ.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
+
+    add_safe_globals = getattr(torch.serialization, "add_safe_globals", None)
+    if add_safe_globals is None:
+        return
+
+    try:
+        from omegaconf.base import ContainerMetadata
+        from omegaconf import DictConfig, ListConfig
+
+        add_safe_globals([ListConfig, DictConfig, ContainerMetadata, Any])
+    except Exception as e:
+        logger.warning(f"Failed to configure Torch safe globals for WhisperX: {e}")
 
 
 def ensure_submaker_compatibility(sub_maker):
@@ -1631,6 +1651,7 @@ def chatterbox_tts(
         
         if whisperx_model is None:
             logger.info("Loading WhisperX model...")
+            configure_torch_safe_globals_for_whisperx()
             # Use appropriate compute type for CPU
             compute_type = "int8" if device == "cpu" else "float16"
             try:
