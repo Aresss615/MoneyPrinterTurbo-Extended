@@ -2,6 +2,7 @@
 
 import glob
 import itertools
+import math
 import os
 import random
 import gc
@@ -18,6 +19,7 @@ from moviepy import (
     TextClip,
     VideoFileClip,
     afx,
+    vfx,
     concatenate_videoclips,
 )
 from moviepy.video.tools.subtitles import SubtitlesClip
@@ -70,6 +72,217 @@ class SubClippedVideoClip:
 
     def __str__(self):
         return f"SubClippedVideoClip(file_path={self.file_path}, start_time={self.start_time}, end_time={self.end_time}, duration={self.duration}, width={self.width}, height={self.height})"
+
+
+def sequential_subclips_needed(audio_duration: float, max_clip_duration: int) -> int:
+    """How many consecutive max-length subclips are needed to cover the audio.
+
+    Sequential mode previously took a single subclip per source video, which
+    left long narrations with only a few seconds of footage (and a black screen
+    for the remainder). For a single long gameplay source we instead walk enough
+    consecutive subclips to span the whole narration.
+    """
+    if max_clip_duration <= 0:
+        return 1
+    return max(1, math.ceil(audio_duration / max_clip_duration))
+
+
+def _load_font(font_path: str, size: int):
+    """Load a truetype font, falling back to PIL's default if unavailable."""
+    try:
+        return ImageFont.truetype(font_path, size)
+    except Exception:
+        return ImageFont.load_default()
+
+
+def _wrap_text_pixels(text: str, font, max_width: int) -> list:
+    """Greedy word-wrap a string to fit within max_width pixels for the font."""
+    words = text.split()
+    if not words:
+        return [""]
+
+    def text_width(s: str) -> float:
+        try:
+            return font.getlength(s)
+        except Exception:
+            return font.getbbox(s)[2]
+
+    lines = []
+    current = words[0]
+    for word in words[1:]:
+        candidate = f"{current} {word}"
+        if text_width(candidate) <= max_width:
+            current = candidate
+        else:
+            lines.append(current)
+            current = word
+    lines.append(current)
+    return lines
+
+
+def create_comment_card_image(
+    width: int,
+    username: str,
+    title: str,
+    font_path: str,
+    likes: str = "99+",
+    verified: bool = True,
+):
+    """Render a Reddit/TikTok-style comment card as an RGBA PIL image.
+
+    The card has a translucent dark rounded background with an avatar, the
+    username and a verified badge, the wrapped title text, and a like/share
+    footer row. Height grows with the wrapped title so longer titles fit.
+    """
+    pad = int(width * 0.045)
+    avatar_d = int(width * 0.11)
+    username_size = max(14, int(width * 0.044))
+    title_size = max(16, int(width * 0.062))
+    footer_size = max(13, int(width * 0.040))
+
+    username_font = _load_font(font_path, username_size)
+    title_font = _load_font(font_path, title_size)
+    footer_font = _load_font(font_path, footer_size)
+
+    text_left = pad + avatar_d + int(width * 0.03)
+    title_max_width = width - 2 * pad
+    title_lines = _wrap_text_pixels(title, title_font, title_max_width)
+
+    line_gap = int(title_size * 0.30)
+    title_line_h = title_size + line_gap
+    title_block_h = title_line_h * len(title_lines)
+
+    header_h = avatar_d
+    footer_h = int(footer_size * 1.8)
+    inner_gap = int(width * 0.035)
+
+    height = pad + header_h + inner_gap + title_block_h + inner_gap + footer_h + pad
+
+    img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    # Card background
+    radius = int(width * 0.05)
+    draw.rounded_rectangle(
+        [0, 0, width - 1, height - 1], radius=radius, fill=(18, 18, 22, 235)
+    )
+
+    # Avatar (gray disc with a simple person silhouette)
+    ax0, ay0 = pad, pad
+    ax1, ay1 = pad + avatar_d, pad + avatar_d
+    draw.ellipse([ax0, ay0, ax1, ay1], fill=(120, 124, 132, 255))
+    head_r = avatar_d * 0.18
+    cx = (ax0 + ax1) / 2
+    draw.ellipse(
+        [cx - head_r, ay0 + avatar_d * 0.22, cx + head_r, ay0 + avatar_d * 0.22 + 2 * head_r],
+        fill=(60, 63, 70, 255),
+    )
+    draw.ellipse(
+        [ax0 + avatar_d * 0.22, ay0 + avatar_d * 0.58, ax1 - avatar_d * 0.22, ay1 + avatar_d * 0.30],
+        fill=(60, 63, 70, 255),
+    )
+
+    # Username
+    uname_y = pad + (avatar_d - username_size) // 2
+    draw.text((text_left, uname_y), username, font=username_font, fill=(235, 235, 240, 255))
+
+    # Verified badge (blue disc + white check)
+    try:
+        uname_w = username_font.getlength(username)
+    except Exception:
+        uname_w = username_font.getbbox(username)[2]
+    if verified:
+        badge_d = int(username_size * 0.95)
+        bx = text_left + uname_w + int(width * 0.02)
+        by = uname_y + (username_size - badge_d) // 2
+        draw.ellipse([bx, by, bx + badge_d, by + badge_d], fill=(64, 150, 255, 255))
+        draw.line(
+            [
+                (bx + badge_d * 0.27, by + badge_d * 0.52),
+                (bx + badge_d * 0.43, by + badge_d * 0.68),
+                (bx + badge_d * 0.75, by + badge_d * 0.32),
+            ],
+            fill=(255, 255, 255, 255),
+            width=max(2, badge_d // 8),
+            joint="curve",
+        )
+
+    # Title
+    ty = pad + header_h + inner_gap
+    for line in title_lines:
+        draw.text((pad, ty), line, font=title_font, fill=(245, 245, 248, 255))
+        ty += title_line_h
+
+    # Footer: heart + likes, and Share on the right
+    fy = height - pad - footer_h
+    heart_size = int(footer_size * 1.0)
+    hx, hy = pad, fy + (footer_h - heart_size) // 2
+    _draw_heart(draw, hx, hy, heart_size, fill=(255, 90, 95, 255))
+    draw.text(
+        (hx + heart_size + int(width * 0.015), fy + (footer_h - footer_size) // 2),
+        likes,
+        font=footer_font,
+        fill=(200, 200, 205, 255),
+    )
+    share_text = "Share"
+    try:
+        share_w = footer_font.getlength(share_text)
+    except Exception:
+        share_w = footer_font.getbbox(share_text)[2]
+    draw.text(
+        (width - pad - share_w, fy + (footer_h - footer_size) // 2),
+        share_text,
+        font=footer_font,
+        fill=(200, 200, 205, 255),
+    )
+
+    return img
+
+
+def _draw_heart(draw, x, y, size, fill):
+    """Draw a small filled heart with its top-left at (x, y)."""
+    r = size / 4
+    draw.ellipse([x, y, x + 2 * r, y + 2 * r], fill=fill)
+    draw.ellipse([x + 2 * r, y, x + 4 * r, y + 2 * r], fill=fill)
+    draw.polygon(
+        [(x, y + r), (x + 2 * r, y + size), (x + 4 * r, y + r)],
+        fill=fill,
+    )
+
+
+def create_comment_card_clip(params, video_width: int, video_height: int, font_path: str):
+    """Build a positioned, time-limited ImageClip of the comment card overlay.
+
+    Returns None when no title/subject text is available. The card is shown for
+    the opening ``comment_card_duration`` seconds, fading out at the end.
+    """
+    title = (getattr(params, "comment_card_title", "") or "").strip()
+    if not title:
+        title = (getattr(params, "video_subject", "") or "").strip()
+    if not title:
+        return None
+
+    username = getattr(params, "comment_card_username", None) or "u/throwaway"
+    likes = getattr(params, "comment_card_likes", None) or "99+"
+    duration = float(getattr(params, "comment_card_duration", 4.0) or 4.0)
+
+    card_width = int(video_width * 0.86)
+    card_img = create_comment_card_image(
+        width=card_width,
+        username=username,
+        title=title,
+        font_path=font_path,
+        likes=likes,
+    )
+
+    clip = ImageClip(np.array(card_img)).with_start(0).with_duration(duration)
+    y = int(video_height * 0.26)
+    clip = clip.with_position(("center", y))
+    try:
+        clip = clip.with_effects([vfx.CrossFadeOut(0.4)])
+    except Exception as e:
+        logger.warning(f"comment card fade-out unavailable: {e}")
+    return clip
 
 
 def calculate_cover_resize_and_crop(source_size: tuple[int, int], target_size: tuple[int, int]):
@@ -314,9 +527,13 @@ def combine_videos(
                 end_time = min(start_time + max_clip_duration, clip_duration)            
                 if clip_duration - start_time >= max_clip_duration:
                     subclipped_items.append(SubClippedVideoClip(file_path= video_path, start_time=start_time, end_time=end_time, width=clip_w, height=clip_h))
-                start_time = end_time    
+                start_time = end_time
                 if video_concat_mode.value == VideoConcatMode.sequential.value:
-                    break
+                    # Collect enough consecutive subclips to cover the narration
+                    # instead of stopping after the first one, which left long
+                    # audio with only a few seconds of footage (black thereafter).
+                    if len(subclipped_items) >= sequential_subclips_needed(audio_duration, max_clip_duration):
+                        break
 
         # random subclipped_items order
         if video_concat_mode.value == VideoConcatMode.random.value:
@@ -937,6 +1154,16 @@ def generate_video(
         [afx.MultiplyVolume(params.voice_volume)]
     )
 
+    overlay_clips = []
+    if getattr(params, "comment_card_enabled", False):
+        try:
+            card_clip = create_comment_card_clip(params, video_width, video_height, font_path)
+            if card_clip is not None:
+                overlay_clips.append(card_clip)
+                logger.info("added Reddit-style comment card overlay")
+        except Exception as e:
+            logger.error(f"failed to build comment card overlay: {e}")
+
     def make_textclip(text):
         return TextClip(
             text=text,
@@ -967,8 +1194,20 @@ def generate_video(
             for item in sub.subtitles:
                 clip = create_text_clip(subtitle_item=item)
                 text_clips.append(clip)
-        
-        video_clip = CompositeVideoClip([video_clip, *text_clips])
+
+        if overlay_clips and getattr(params, "comment_card_enabled", False):
+            # While the comment card is shown, hide captions so the intro matches
+            # the reference (card alone first), then captions take over.
+            card_secs = float(getattr(params, "comment_card_duration", 4.0) or 4.0)
+            text_clips = [
+                c for c in text_clips
+                if getattr(c, "start", None) is None or c.start >= card_secs - 0.05
+            ]
+
+        video_clip = CompositeVideoClip([video_clip, *overlay_clips, *text_clips])
+    elif overlay_clips:
+        # No subtitles, but we still need to overlay the comment card.
+        video_clip = CompositeVideoClip([video_clip, *overlay_clips])
 
     bgm_file = get_bgm_file(bgm_type=params.bgm_type, bgm_file=params.bgm_file)
     if bgm_file:

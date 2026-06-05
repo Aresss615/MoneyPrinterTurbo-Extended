@@ -112,7 +112,14 @@ class VideoParams(BaseModel):
     word_highlight_color: Optional[str] = "#ff0000"
     max_chars_per_line: Optional[int] = 40
     max_lines_per_subtitle: Optional[int] = 2
-    
+
+    # Reddit/TikTok-style comment card intro overlay
+    comment_card_enabled: Optional[bool] = False
+    comment_card_username: Optional[str] = "u/throwaway"
+    comment_card_title: Optional[str] = ""  # falls back to video_subject
+    comment_card_likes: Optional[str] = "99+"
+    comment_card_duration: Optional[float] = 4.0  # seconds shown at the start
+
     # Semantic video settings
     segmentation_method: Optional[str] = "sentences"
     min_segment_length: Optional[int] = 25

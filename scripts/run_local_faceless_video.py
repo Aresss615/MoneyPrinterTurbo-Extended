@@ -16,10 +16,23 @@ from app.utils import utils
 
 
 DEFAULT_VOICE_NAME = "chatterbox:default:Default Voice-Neutral"
+DEFAULT_CARD_USERNAME = "u/throwaway_aita"
 GAMEPLAY_PATH = ROOT_DIR / "gameplay" / "minecraft-parkour-1.mp4"
 
 
-def build_video_params(story: str) -> VideoParams:
+def derive_card_title(story: str, max_chars: int = 140) -> str:
+    """Use the opening question/sentence of the story as the comment-card title."""
+    story = story.strip()
+    for terminator in ("?", ".", "!"):
+        idx = story.find(terminator)
+        if idx != -1:
+            return story[: idx + 1].strip()
+    if len(story) > max_chars:
+        return story[:max_chars].rsplit(" ", 1)[0].strip() + "…"
+    return story
+
+
+def build_video_params(story: str, card_username: str = DEFAULT_CARD_USERNAME) -> VideoParams:
     story = story.strip()
     if not story:
         raise ValueError("story must not be empty")
@@ -48,11 +61,11 @@ def build_video_params(story: str) -> VideoParams:
         bgm_file="",
         bgm_volume=0.0,
         subtitle_enabled=True,
-        subtitle_position="bottom",
+        subtitle_position="center",
         custom_position=70.0,
         font_name="STHeitiMedium.ttc",
         text_fore_color="#FFFFFF",
-        text_background_color=True,
+        text_background_color=False,
         font_size=60,
         stroke_color="#000000",
         stroke_width=1.5,
@@ -60,6 +73,11 @@ def build_video_params(story: str) -> VideoParams:
         word_highlight_color="#ff0000",
         max_chars_per_line=40,
         max_lines_per_subtitle=2,
+        comment_card_enabled=True,
+        comment_card_username=card_username,
+        comment_card_title=derive_card_title(story),
+        comment_card_likes="99+",
+        comment_card_duration=4.0,
         n_threads=2,
         paragraph_number=1,
     )

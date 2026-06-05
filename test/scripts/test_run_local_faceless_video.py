@@ -30,6 +30,31 @@ class TestRunLocalFacelessVideo(unittest.TestCase):
         self.assertEqual(params.video_materials[0].provider, "local")
         self.assertTrue(params.video_materials[0].url.endswith("gameplay/minecraft-parkour-1.mp4"))
 
+    def test_build_video_params_enables_reddit_card_and_center_captions(self):
+        from scripts import run_local_faceless_video as runner
+
+        params = runner.build_video_params(
+            "AITA for labeling my leftovers? My roommate kept eating them."
+        )
+
+        self.assertEqual(params.subtitle_position, "center")
+        self.assertTrue(params.comment_card_enabled)
+        self.assertEqual(params.comment_card_username, runner.DEFAULT_CARD_USERNAME)
+        # Card title is the opening question only, not the whole story.
+        self.assertEqual(params.comment_card_title, "AITA for labeling my leftovers?")
+
+    def test_derive_card_title_takes_first_sentence(self):
+        from scripts import run_local_faceless_video as runner
+
+        self.assertEqual(
+            runner.derive_card_title("AITA for X? Then more text here."),
+            "AITA for X?",
+        )
+        self.assertEqual(
+            runner.derive_card_title("My neighbor parked in my spot. I was mad."),
+            "My neighbor parked in my spot.",
+        )
+
     def test_main_calls_existing_task_pipeline_and_prints_json_result(self):
         from scripts import run_local_faceless_video as runner
 
