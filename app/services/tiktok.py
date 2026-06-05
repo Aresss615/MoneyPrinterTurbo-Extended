@@ -34,6 +34,10 @@ PUBLISH_STATUS_URL = "https://open.tiktokapis.com/v2/post/publish/status/fetch/"
 SCOPES = "video.publish,video.upload"
 DEFAULT_PRIVACY = "SELF_ONLY"
 DEFAULT_COVER_TIMESTAMP_MS = 1000
+MIN_CHUNK_SIZE = 5 * 1024 * 1024
+MAX_CHUNK_SIZE = 64 * 1024 * 1024
+MAX_TOTAL_CHUNKS = 1000
+OAUTH_STATE_TTL_SECONDS = 600
 # Terminal states reported by the publish status endpoint.
 _TERMINAL_STATES = {"PUBLISH_COMPLETE", "FAILED"}
 
@@ -56,7 +60,7 @@ def _client_secret() -> str:
 def _redirect_uri() -> str:
     return (
         config.tiktok.get("redirect_uri")
-        or "http://127.0.0.1:8080/api/v1/tiktok/callback"
+        or "https://your-cloudflare-tunnel.example.com/api/v1/tiktok/callback"
     ).strip()
 
 
@@ -102,6 +106,58 @@ def _store_token_response(payload: dict) -> dict:
     }
     save_token_cache(cache)
     return cache
+
+
+def _state_path() -> str:
+    return os.path.join(utils.storage_dir(create=True), "tiktok_oauth_state.json")
+
+
+def _load_oauth_states() -> list[dict]:
+    path = _state_path()
+    if not os.path.isfile(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as fp:
+            payload = json.load(fp)
+    except (ValueError, OSError) as exc:
+        logger.warning(f"failed to read tiktok oauth state cache: {exc}")
+        return []
+    if isinstance(payload, dict) and isinstance(payload.get("states"), list):
+        return payload["states"]
+    return []
+
+
+def _save_oauth_states(states: list[dict]) -> None:
+    with open(_state_path(), "w", encoding="utf-8") as fp:
+        json.dump({"states": states}, fp, indent=2)
+
+
+def save_oauth_state(state: str) -> None:
+    now = time.time()
+    expires_at = now + OAUTH_STATE_TTL_SECONDS
+    states = [
+        item
+        for item in _load_oauth_states()
+        if float(item.get("expires_at", 0) or 0) > now
+    ]
+    states.append({"state": state, "expires_at": expires_at})
+    _save_oauth_states(states)
+
+
+def consume_oauth_state(state: str) -> bool:
+    now = time.time()
+    matched = False
+    remaining = []
+    for item in _load_oauth_states():
+        item_state = str(item.get("state", ""))
+        expires_at = float(item.get("expires_at", 0) or 0)
+        if item_state == state and expires_at > now:
+            matched = True
+            continue
+        if expires_at > now:
+            remaining.append(item)
+    _save_oauth_states(remaining)
+    return matched
 
 
 # --------------------------------------------------------------------------- #
@@ -223,9 +279,45 @@ def query_creator_info(token: Optional[str] = None) -> dict:
     return _check_envelope(resp)
 
 
-def _read_video_bytes(video_path: str) -> bytes:
+def build_upload_plan(video_size: int) -> dict:
+    if video_size <= 0:
+        raise TikTokError("video is empty")
+    if video_size <= MAX_CHUNK_SIZE:
+        chunk_size = video_size
+        total_chunk_count = 1
+    elif video_size < MAX_CHUNK_SIZE * 2:
+        chunk_size = max(MIN_CHUNK_SIZE, video_size // 2)
+        total_chunk_count = video_size // chunk_size
+    else:
+        chunk_size = MAX_CHUNK_SIZE
+        total_chunk_count = video_size // chunk_size
+    if total_chunk_count < 1 or total_chunk_count > MAX_TOTAL_CHUNKS:
+        raise TikTokError(
+            f"unsupported video size for TikTok chunk upload: {video_size} bytes"
+        )
+    return {
+        "video_size": video_size,
+        "chunk_size": chunk_size,
+        "total_chunk_count": total_chunk_count,
+    }
+
+
+def _iter_video_chunks(
+    video_path: str, video_size: int, chunk_size: int, total_chunk_count: int
+):
     with open(video_path, "rb") as fp:
-        return fp.read()
+        for index in range(total_chunk_count):
+            start = index * chunk_size
+            if index == total_chunk_count - 1:
+                length = video_size - start
+            else:
+                length = chunk_size
+            chunk = fp.read(length)
+            if len(chunk) != length:
+                raise TikTokError(
+                    f"failed to read video chunk {index + 1}/{total_chunk_count}"
+                )
+            yield start, start + len(chunk) - 1, chunk
 
 
 def publish_video(
@@ -239,6 +331,9 @@ def publish_video(
     disable_comment: Optional[bool] = None,
     disable_duet: Optional[bool] = None,
     disable_stitch: Optional[bool] = None,
+    brand_content_toggle: Optional[bool] = None,
+    brand_organic_toggle: Optional[bool] = None,
+    is_aigc: Optional[bool] = None,
     access_token: Optional[str] = None,
     poll: bool = True,
     poll_interval: float = 3.0,
@@ -266,9 +361,15 @@ def publish_video(
         disable_duet = bool(config.tiktok.get("disable_duet", False))
     if disable_stitch is None:
         disable_stitch = bool(config.tiktok.get("disable_stitch", False))
+    if brand_content_toggle is None:
+        brand_content_toggle = bool(config.tiktok.get("brand_content_toggle", False))
+    if brand_organic_toggle is None:
+        brand_organic_toggle = bool(config.tiktok.get("brand_organic_toggle", False))
+    if is_aigc is None:
+        is_aigc = bool(config.tiktok.get("is_aigc", False))
 
-    video_bytes = _read_video_bytes(video_path)
-    video_size = len(video_bytes)
+    video_size = os.path.getsize(video_path)
+    upload_plan = build_upload_plan(video_size)
 
     init_body = {
         "post_info": {
@@ -278,12 +379,13 @@ def publish_video(
             "disable_duet": disable_duet,
             "disable_stitch": disable_stitch,
             "video_cover_timestamp_ms": cover_timestamp_ms,
+            "brand_content_toggle": brand_content_toggle,
+            "brand_organic_toggle": brand_organic_toggle,
+            "is_aigc": is_aigc,
         },
         "source_info": {
             "source": "FILE_UPLOAD",
-            "video_size": video_size,
-            "chunk_size": video_size,
-            "total_chunk_count": 1,
+            **upload_plan,
         },
     }
 
@@ -297,18 +399,28 @@ def publish_video(
     if not publish_id or not upload_url:
         raise TikTokError(f"init response missing publish_id/upload_url: {data}")
 
-    logger.info(f"tiktok: uploading {video_size} bytes for publish_id={publish_id}")
-    put_resp = requests.put(
-        upload_url,
-        data=video_bytes,
-        headers={
-            "Content-Type": "video/mp4",
-            "Content-Range": f"bytes 0-{video_size - 1}/{video_size}",
-            "Content-Length": str(video_size),
-        },
-        timeout=600,
+    logger.info(
+        f"tiktok: uploading {video_size} bytes in "
+        f"{upload_plan['total_chunk_count']} chunk(s) for publish_id={publish_id}"
     )
-    put_resp.raise_for_status()
+    chunks = _iter_video_chunks(
+        video_path,
+        video_size,
+        upload_plan["chunk_size"],
+        upload_plan["total_chunk_count"],
+    )
+    for start, end, chunk in chunks:
+        put_resp = requests.put(
+            upload_url,
+            data=chunk,
+            headers={
+                "Content-Type": "video/mp4",
+                "Content-Range": f"bytes {start}-{end}/{video_size}",
+                "Content-Length": str(len(chunk)),
+            },
+            timeout=600,
+        )
+        put_resp.raise_for_status()
 
     if not poll:
         return {"status": "PROCESSING_UPLOAD", "publish_id": publish_id}

@@ -193,6 +193,34 @@
                     </div>
                     <video id="outputVideo" class="output-video" controls playsinline></video>
                     <a id="downloadLink" class="download-link" href="#" download>Open generated video</a>
+                    <div class="publish-settings" id="publishSettings">
+                        <label class="settings-field wide">
+                            <span>TikTok privacy</span>
+                            <select id="tiktokPrivacy">
+                                <option value="">Choose privacy</option>
+                            </select>
+                        </label>
+                        <label class="toggle-row">
+                            <input id="allowComment" type="checkbox">
+                            <span>Allow comments</span>
+                        </label>
+                        <label class="toggle-row">
+                            <input id="allowDuet" type="checkbox">
+                            <span>Allow duet</span>
+                        </label>
+                        <label class="toggle-row">
+                            <input id="allowStitch" type="checkbox">
+                            <span>Allow stitch</span>
+                        </label>
+                        <label class="toggle-row">
+                            <input id="tiktokAigc" type="checkbox">
+                            <span>Label as AI-generated</span>
+                        </label>
+                        <label class="toggle-row consent">
+                            <input id="tiktokConsent" type="checkbox">
+                            <span>By posting, I agree to TikTok's Music Usage Confirmation.</span>
+                        </label>
+                    </div>
                     <button class="primary-button full" id="publishTikTok" type="button" style="display:none">Publish to TikTok</button>
                     <p class="status-message" id="publishStatus"></p>
                 </div>

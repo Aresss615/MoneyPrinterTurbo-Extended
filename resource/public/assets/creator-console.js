@@ -85,6 +85,13 @@ const els = {
     tiktokPill: document.querySelector("#tiktokPill"),
     publishTikTok: document.querySelector("#publishTikTok"),
     publishStatus: document.querySelector("#publishStatus"),
+    publishSettings: document.querySelector("#publishSettings"),
+    tiktokPrivacy: document.querySelector("#tiktokPrivacy"),
+    allowComment: document.querySelector("#allowComment"),
+    allowDuet: document.querySelector("#allowDuet"),
+    allowStitch: document.querySelector("#allowStitch"),
+    tiktokAigc: document.querySelector("#tiktokAigc"),
+    tiktokConsent: document.querySelector("#tiktokConsent"),
 };
 
 let pollTimer = null;
@@ -92,6 +99,7 @@ let saveTimer = null;
 let connectionTimer = null;
 let tiktokTimer = null;
 let currentTaskId = null;
+let tiktokCreatorInfo = {};
 
 function words(text) {
     return (text || "").match(/\b[\w'-]+\b/g) || [];
@@ -460,6 +468,46 @@ function setTikTokPill(state, message, href) {
     }
 }
 
+function privacyLabel(value) {
+    const labels = {
+        PUBLIC_TO_EVERYONE: "Public",
+        MUTUAL_FOLLOW_FRIENDS: "Friends",
+        FOLLOWER_OF_CREATOR: "Followers",
+        SELF_ONLY: "Only me",
+    };
+    return labels[value] || value.replace(/_/g, " ").toLowerCase();
+}
+
+function setInteractionControl(input, disabledByTikTok) {
+    input.disabled = Boolean(disabledByTikTok);
+    if (input.disabled) input.checked = false;
+}
+
+function updateTikTokPublishSettings(data) {
+    tiktokCreatorInfo = data.creator_info || {};
+    const options = Array.isArray(tiktokCreatorInfo.privacy_level_options)
+        ? tiktokCreatorInfo.privacy_level_options
+        : [];
+    const privacyOptions = options.length ? options : [data.privacy_level || "SELF_ONLY"];
+    const previousPrivacy = els.tiktokPrivacy.value;
+
+    els.tiktokPrivacy.innerHTML = '<option value="">Choose privacy</option>';
+    privacyOptions.forEach((privacy) => {
+        if (!privacy) return;
+        const option = document.createElement("option");
+        option.value = privacy;
+        option.textContent = privacyLabel(privacy);
+        els.tiktokPrivacy.appendChild(option);
+    });
+    if (privacyOptions.includes(previousPrivacy)) {
+        els.tiktokPrivacy.value = previousPrivacy;
+    }
+
+    setInteractionControl(els.allowComment, tiktokCreatorInfo.comment_disabled);
+    setInteractionControl(els.allowDuet, tiktokCreatorInfo.duet_disabled);
+    setInteractionControl(els.allowStitch, tiktokCreatorInfo.stitch_disabled);
+}
+
 async function checkTikTokStatus() {
     try {
         const response = await fetch("/api/v1/tiktok/status", { cache: "no-store" });
@@ -467,8 +515,10 @@ async function checkTikTokStatus() {
         const data = payload.data || {};
         if (!data.configured) {
             setTikTokPill("disconnected", "TikTok: not set up", null);
+            updateTikTokPublishSettings({ privacy_level: "SELF_ONLY" });
             return;
         }
+        updateTikTokPublishSettings(data);
         if (data.connected) {
             setTikTokPill("connected", `TikTok: ${data.nickname || "connected"}`, null);
             return;
@@ -500,6 +550,20 @@ async function publishToTikTok() {
         return;
     }
     const story = collectStory();
+    const maxDuration = Number(tiktokCreatorInfo.max_video_post_duration_sec || 0);
+    const estimatedDuration = estimateSeconds(story.narration_script);
+    if (!els.tiktokPrivacy.value) {
+        setPublishStatus("Choose a TikTok privacy setting first.", "error");
+        return;
+    }
+    if (!els.tiktokConsent.checked) {
+        setPublishStatus("Confirm TikTok music usage before posting.", "error");
+        return;
+    }
+    if (maxDuration > 0 && estimatedDuration > maxDuration) {
+        setPublishStatus(`TikTok allows up to ${maxDuration}s for this account.`, "error");
+        return;
+    }
     els.publishTikTok.disabled = true;
     els.publishTikTok.textContent = "Publishing...";
     setPublishStatus("Uploading to TikTok. This can take a minute.");
@@ -512,6 +576,13 @@ async function publishToTikTok() {
                 task_id: currentTaskId,
                 description: story.comment_card_title || story.video_subject,
                 hashtags: story.suggested_hashtags,
+                privacy: els.tiktokPrivacy.value,
+                disable_comment: !els.allowComment.checked,
+                disable_duet: !els.allowDuet.checked,
+                disable_stitch: !els.allowStitch.checked,
+                brand_content_toggle: false,
+                brand_organic_toggle: false,
+                is_aigc: els.tiktokAigc.checked,
             }),
         });
         const payload = await response.json();

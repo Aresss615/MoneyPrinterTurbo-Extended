@@ -76,31 +76,59 @@ Manually publish a finished video to TikTok from the creator console
 One-time setup:
 
 1. Register an app at https://developers.tiktok.com.
-2. Add the **Content Posting API** product and request the
-   `video.publish` + `video.upload` scopes.
-3. Set a redirect URI that matches `config.toml [tiktok] redirect_uri`
-   (default `http://127.0.0.1:8080/api/v1/tiktok/callback`).
-4. Copy the app's **client key** and **client secret** into `config.toml`:
+2. Publish the repo's simple legal pages with GitHub Pages and use their HTTPS
+   URLs in the TikTok form:
+   - `docs/tiktok-terms.md`
+   - `docs/tiktok-privacy.md`
+3. Add the **Content Posting API** product and request only these scopes:
+   `video.publish` + `video.upload`.
+4. Start the creator app locally:
+   ```bash
+   ./creator.sh
+   ```
+5. Expose the local app with an HTTPS tunnel. Cloudflare Tunnel example:
+   ```bash
+   cloudflared tunnel --url http://127.0.0.1:8080
+   ```
+   Copy the generated `https://...trycloudflare.com` URL.
+6. In TikTok Login Kit settings, set a redirect URI that exactly matches:
+   `https://<your-cloudflare-url>/api/v1/tiktok/callback`.
+7. Copy the app's **client key** and **client secret** into `config.toml`:
 
    ```toml
    [tiktok]
    client_key = "..."
    client_secret = "..."
-   redirect_uri = "http://127.0.0.1:8080/api/v1/tiktok/callback"
+   redirect_uri = "https://<your-cloudflare-url>/api/v1/tiktok/callback"
    privacy_level = "SELF_ONLY"   # PUBLIC_TO_EVERYONE after TikTok audits your app
+   disable_comment = false
+   disable_duet = false
+   disable_stitch = false
+   brand_content_toggle = false
+   brand_organic_toggle = false
+   is_aigc = false
    ```
 
-5. Start the server (`creator.sh`), then open `/api/v1/tiktok/auth-url`
-   (the console's "TikTok: connect" pill links here) and authorize once.
-   The OAuth token is cached in `storage/tiktok_token.json` and refreshed
-   automatically.
+8. Restart the creator app, then click the console's "TikTok: connect" pill and
+   authorize once. The OAuth token is cached in `storage/tiktok_token.json` and
+   refreshed automatically.
+9. Generate a video, choose TikTok privacy (`SELF_ONLY` for private testing),
+   confirm TikTok music usage, then click "Publish to TikTok".
 
 Notes:
 
-- **Unaudited apps can only post privately** (`SELF_ONLY`). After TikTok
-  audits your app, change `privacy_level` to `PUBLIC_TO_EVERYONE` — no code
-  change required.
+- TikTok Web Login Kit redirect URIs must be absolute HTTPS URLs. Plain
+  `http://127.0.0.1:8080/...` works for the local server, but cannot be
+  registered as a Web redirect URI in TikTok's app settings.
+- **Unaudited apps can only post privately** (`SELF_ONLY`). After TikTok audits
+  your app, the UI will use the privacy options returned by TikTok's
+  `creator_info` endpoint.
+- Generated 60s vertical videos in this repo are often larger than 64 MB, so
+  the integration uploads them sequentially in TikTok-compliant chunks.
 - The caption/hashtags default to the story's `suggested_description` +
   `suggested_hashtags` (persisted to `storage/tasks/<id>/story.json`) but can
   be overridden in the publish request.
 - A cover thumbnail is taken from `cover_timestamp_ms` (default 1000 ms).
+- For final public posting review, record a demo that shows login, privacy
+  selection, interaction settings, music usage consent, and the manual publish
+  click.

@@ -41,7 +41,9 @@ class TestTikTokService(unittest.TestCase):
         from app.services import tiktok
 
         with patch.object(
-            tiktok.config, "tiktok", {"client_key": "abc", "redirect_uri": "http://cb"}
+            tiktok.config,
+            "tiktok",
+            {"client_key": "abc", "redirect_uri": "https://dev.example.com/cb"},
         ):
             url = tiktok.build_authorize_url("xyz-state")
 
@@ -49,6 +51,30 @@ class TestTikTokService(unittest.TestCase):
         self.assertIn("scope=video.publish%2Cvideo.upload", url)
         self.assertIn("state=xyz-state", url)
         self.assertIn("response_type=code", url)
+        self.assertIn("redirect_uri=https%3A%2F%2Fdev.example.com%2Fcb", url)
+
+    def test_build_upload_plan_splits_current_89mb_outputs(self):
+        from app.services import tiktok
+
+        plan = tiktok.build_upload_plan(89 * 1024 * 1024)
+
+        self.assertEqual(plan["total_chunk_count"], 2)
+        self.assertGreaterEqual(plan["chunk_size"], tiktok.MIN_CHUNK_SIZE)
+        self.assertLessEqual(plan["chunk_size"], tiktok.MAX_CHUNK_SIZE)
+
+    def test_build_upload_plan_uses_single_chunk_at_64mb_boundary(self):
+        from app.services import tiktok
+
+        plan = tiktok.build_upload_plan(tiktok.MAX_CHUNK_SIZE)
+
+        self.assertEqual(
+            plan,
+            {
+                "video_size": tiktok.MAX_CHUNK_SIZE,
+                "chunk_size": tiktok.MAX_CHUNK_SIZE,
+                "total_chunk_count": 1,
+            },
+        )
 
     def test_get_valid_access_token_refreshes_when_expired(self):
         from app.services import tiktok
@@ -110,7 +136,9 @@ class TestTikTokService(unittest.TestCase):
         put_resp.raise_for_status.return_value = None
 
         with patch.object(tiktok.os.path, "isfile", return_value=True), patch.object(
-            tiktok, "_read_video_bytes", return_value=b"x" * 2048
+            tiktok.os.path, "getsize", return_value=2048
+        ), patch.object(
+            tiktok, "_iter_video_chunks", return_value=[(0, 2047, b"x" * 2048)]
         ), patch.object(
             tiktok.config,
             "tiktok",
@@ -144,6 +172,49 @@ class TestTikTokService(unittest.TestCase):
         self.assertEqual(result["status"], "PUBLISH_COMPLETE")
         self.assertEqual(result["publish_id"], "pub-1")
 
+    def test_publish_video_uploads_large_video_in_sequential_chunks(self):
+        from app.services import tiktok
+
+        video_size = 89 * 1024 * 1024
+        plan = tiktok.build_upload_plan(video_size)
+        init_resp = _ok({"publish_id": "pub-2", "upload_url": "https://upload"})
+        put_resp = MagicMock(status_code=206)
+        put_resp.raise_for_status.return_value = None
+        chunks = [
+            (0, plan["chunk_size"] - 1, b"first"),
+            (plan["chunk_size"], video_size - 1, b"second"),
+        ]
+
+        with patch.object(tiktok.os.path, "isfile", return_value=True), patch.object(
+            tiktok.os.path, "getsize", return_value=video_size
+        ), patch.object(
+            tiktok, "_iter_video_chunks", return_value=chunks
+        ), patch.object(
+            tiktok.config, "tiktok", {"privacy_level": "SELF_ONLY"}
+        ), patch.object(
+            tiktok.requests, "post", return_value=init_resp
+        ) as post, patch.object(
+            tiktok.requests, "put", return_value=put_resp
+        ) as put:
+            result = tiktok.publish_video(
+                "/tmp/final.mp4", title="t", access_token="tok", poll=False
+            )
+
+        init_body = post.call_args.kwargs["json"]
+        self.assertEqual(init_body["source_info"]["video_size"], video_size)
+        self.assertEqual(init_body["source_info"]["chunk_size"], plan["chunk_size"])
+        self.assertEqual(init_body["source_info"]["total_chunk_count"], 2)
+        self.assertEqual(put.call_count, 2)
+        self.assertEqual(
+            put.call_args_list[0].kwargs["headers"]["Content-Range"],
+            f"bytes 0-{plan['chunk_size'] - 1}/{video_size}",
+        )
+        self.assertEqual(
+            put.call_args_list[1].kwargs["headers"]["Content-Range"],
+            f"bytes {plan['chunk_size']}-{video_size - 1}/{video_size}",
+        )
+        self.assertEqual(result["status"], "PROCESSING_UPLOAD")
+
     def test_publish_video_raises_on_api_error(self):
         from app.services import tiktok
 
@@ -156,7 +227,9 @@ class TestTikTokService(unittest.TestCase):
         err.raise_for_status.return_value = None
 
         with patch.object(tiktok.os.path, "isfile", return_value=True), patch.object(
-            tiktok, "_read_video_bytes", return_value=b"x"
+            tiktok.os.path, "getsize", return_value=1
+        ), patch.object(
+            tiktok, "_iter_video_chunks", return_value=[(0, 0, b"x")]
         ), patch.object(tiktok.config, "tiktok", {}), patch.object(
             tiktok.requests, "post", return_value=err
         ):

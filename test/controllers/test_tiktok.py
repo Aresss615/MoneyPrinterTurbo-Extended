@@ -36,12 +36,18 @@ class TestTikTokApi(unittest.TestCase):
         with patch.object(
             tiktok.config,
             "tiktok",
-            {"client_key": "abc", "redirect_uri": "http://cb"},
+            {"client_key": "abc", "redirect_uri": "https://dev.example.com/cb"},
+        ), patch.object(
+            tiktok, "save_oauth_state", create=True
+        ) as save_state, patch(
+            "app.controllers.v1.tiktok.utils.get_uuid", return_value="state-1"
         ):
             response = self.client.get("/api/v1/tiktok/auth-url")
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("client_key=abc", response.json()["data"]["auth_url"])
+        self.assertIn("state=state-1", response.json()["data"]["auth_url"])
+        save_state.assert_called_once_with("state-1")
 
     def test_auth_url_returns_400_when_not_configured(self):
         with patch.object(tiktok.config, "tiktok", {}):
@@ -93,6 +99,70 @@ class TestTikTokApi(unittest.TestCase):
         self.assertEqual(
             publish.call_args.kwargs["hashtags"], ["#aita", "#redditstories"]
         )
+
+    def test_callback_rejects_invalid_oauth_state(self):
+        with patch.object(
+            tiktok, "consume_oauth_state", return_value=False, create=True
+        ), patch.object(tiktok, "exchange_code_for_token") as exchange:
+            response = self.client.get(
+                "/api/v1/tiktok/callback?code=abc&state=invalid-state"
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("invalid OAuth state", response.text)
+        exchange.assert_not_called()
+
+    def test_callback_exchanges_code_when_oauth_state_is_valid(self):
+        with patch.object(
+            tiktok, "consume_oauth_state", return_value=True, create=True
+        ), patch.object(
+            tiktok, "exchange_code_for_token", return_value={"open_id": "open-1"}
+        ) as exchange:
+            response = self.client.get(
+                "/api/v1/tiktok/callback?code=abc&state=valid-state"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("TikTok connected", response.text)
+        exchange.assert_called_once_with("abc")
+
+    def test_publish_passes_tiktok_publish_controls(self):
+        task_id = "tiktok-publish-controls"
+        task_path = Path(utils.task_dir(task_id))
+        (task_path / "final-1.mp4").write_bytes(b"fake-video")
+
+        try:
+            with patch.object(
+                tiktok,
+                "publish_video",
+                return_value={"status": "PROCESSING_UPLOAD", "publish_id": "p2"},
+            ) as publish:
+                response = self.client.post(
+                    "/api/v1/tiktok/publish",
+                    json={
+                        "task_id": task_id,
+                        "privacy": "SELF_ONLY",
+                        "disable_comment": True,
+                        "disable_duet": True,
+                        "disable_stitch": False,
+                        "brand_content_toggle": False,
+                        "brand_organic_toggle": False,
+                        "is_aigc": True,
+                    },
+                )
+        finally:
+            try:
+                os.remove(task_path / "final-1.mp4")
+            except OSError:
+                pass
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(publish.call_args.kwargs["disable_comment"])
+        self.assertTrue(publish.call_args.kwargs["disable_duet"])
+        self.assertFalse(publish.call_args.kwargs["disable_stitch"])
+        self.assertFalse(publish.call_args.kwargs["brand_content_toggle"])
+        self.assertFalse(publish.call_args.kwargs["brand_organic_toggle"])
+        self.assertTrue(publish.call_args.kwargs["is_aigc"])
 
 
 if __name__ == "__main__":

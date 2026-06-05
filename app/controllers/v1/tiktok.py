@@ -35,6 +35,12 @@ class PublishRequest(BaseModel):
     hashtags: Optional[list[str]] = None
     privacy: Optional[str] = None
     cover_timestamp_ms: Optional[int] = None
+    disable_comment: Optional[bool] = None
+    disable_duet: Optional[bool] = None
+    disable_stitch: Optional[bool] = None
+    brand_content_toggle: Optional[bool] = None
+    brand_organic_toggle: Optional[bool] = None
+    is_aigc: Optional[bool] = None
     poll: bool = True
 
 
@@ -48,10 +54,11 @@ def tiktok_status(request: Request):
     cache = tiktok.load_token_cache()
     connected = bool(cache.get("access_token"))
     nickname = ""
+    creator_info = {}
     if connected:
         try:
-            info = tiktok.query_creator_info()
-            nickname = info.get("creator_nickname", "")
+            creator_info = tiktok.query_creator_info()
+            nickname = creator_info.get("creator_nickname", "")
         except Exception as exc:  # network/token issues shouldn't 500 the pill
             logger.warning(f"tiktok creator_info failed: {exc}")
     return utils.get_response(
@@ -63,6 +70,7 @@ def tiktok_status(request: Request):
             "privacy_level": tiktok.config.tiktok.get(
                 "privacy_level", tiktok.DEFAULT_PRIVACY
             ),
+            "creator_info": creator_info,
         },
     )
 
@@ -71,7 +79,9 @@ def tiktok_status(request: Request):
 def tiktok_auth_url(request: Request):
     request_id = base.get_task_id(request)
     try:
-        url = tiktok.build_authorize_url(state=utils.get_uuid())
+        state = utils.get_uuid()
+        url = tiktok.build_authorize_url(state=state)
+        tiktok.save_oauth_state(state)
     except tiktok.TikTokError as exc:
         raise HttpException(task_id=request_id, status_code=400, message=str(exc))
     return utils.get_response(200, {"auth_url": url})
@@ -86,6 +96,11 @@ def tiktok_callback(request: Request, code: str = "", state: str = "", error: st
     if not code:
         return HTMLResponse(
             "<h2>TikTok authorization failed</h2><p>missing code</p>", status_code=400
+        )
+    if not state or not tiktok.consume_oauth_state(state):
+        return HTMLResponse(
+            "<h2>TikTok authorization failed</h2><p>invalid OAuth state</p>",
+            status_code=400,
         )
     try:
         cache = tiktok.exchange_code_for_token(code)
@@ -131,6 +146,12 @@ def tiktok_publish(request: Request, body: PublishRequest):
             hashtags=hashtags,
             privacy=body.privacy,
             cover_timestamp_ms=body.cover_timestamp_ms,
+            disable_comment=body.disable_comment,
+            disable_duet=body.disable_duet,
+            disable_stitch=body.disable_stitch,
+            brand_content_toggle=body.brand_content_toggle,
+            brand_organic_toggle=body.brand_organic_toggle,
+            is_aigc=body.is_aigc,
             poll=body.poll,
         )
     except tiktok.TikTokError as exc:

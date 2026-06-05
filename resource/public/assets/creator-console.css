@@ -35,6 +35,7 @@ body {
 
 button,
 input,
+select,
 textarea {
     font: inherit;
     letter-spacing: 0;
@@ -363,7 +364,8 @@ button {
 .story-input:focus,
 .json-input:focus,
 .prompt-box:focus,
-.settings-field input:focus {
+.settings-field input:focus,
+.settings-field select:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
 }
@@ -431,7 +433,8 @@ button {
     text-transform: uppercase;
 }
 
-.settings-field input {
+.settings-field input,
+.settings-field select {
     width: 100%;
     min-height: 40px;
     padding: 0 11px;
@@ -442,6 +445,43 @@ button {
     background: #fbfdff;
     font-size: 14px;
     font-weight: 650;
+}
+
+.publish-settings {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 9px;
+    margin: 12px 0;
+}
+
+.toggle-row {
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    color: #334155;
+    background: #fbfdff;
+    font-size: 12px;
+    line-height: 1.25;
+    font-weight: 750;
+}
+
+.toggle-row input {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+}
+
+.toggle-row:has(input:disabled) {
+    color: #94a3b8;
+    background: #f1f5f9;
+}
+
+.toggle-row.consent {
+    grid-column: 1 / -1;
 }
 
 .preview-column {
@@ -670,7 +710,8 @@ button {
     }
 
     .metrics-grid,
-    .settings-grid {
+    .settings-grid,
+    .publish-settings {
         grid-template-columns: 1fr 1fr;
     }
 
@@ -681,7 +722,8 @@ button {
 
 @media (max-width: 520px) {
     .metrics-grid,
-    .settings-grid {
+    .settings-grid,
+    .publish-settings {
         grid-template-columns: 1fr;
     }
 

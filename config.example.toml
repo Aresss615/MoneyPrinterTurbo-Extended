@@ -225,13 +225,17 @@ hide_log = false
 # product, and request the video.publish + video.upload scopes. See SETUP_NOTES.md.
 client_key = ""
 client_secret = ""
-# Must exactly match a redirect URI registered on your TikTok app.
-redirect_uri = "http://127.0.0.1:8080/api/v1/tiktok/callback"
+# Must exactly match an HTTPS redirect URI registered on your TikTok app.
+# For local testing, point a Cloudflare Tunnel/ngrok URL at http://127.0.0.1:8080.
+redirect_uri = "https://your-cloudflare-tunnel.example.com/api/v1/tiktok/callback"
 # Unaudited apps can only post privately (SELF_ONLY). After TikTok audits your
 # app you may change this to PUBLIC_TO_EVERYONE (no code change needed).
 privacy_level = "SELF_ONLY"
 disable_comment = false
 disable_duet = false
 disable_stitch = false
+brand_content_toggle = false
+brand_organic_toggle = false
+is_aigc = false
 # Frame (in milliseconds) used for the auto-generated cover thumbnail.
 cover_timestamp_ms = 1000
