@@ -365,6 +365,57 @@ Generate a script for a video, depending on the subject of the video.
     return final_script.strip()
 
 
+def expand_script(script: str, target_words: int = 165) -> str:
+    """Expand a short first-person story to ~target_words for a longer narration.
+
+    Preserves the situation, facts, names and point of view, adding natural
+    detail so the spoken audio is long enough (e.g. to clear a platform minimum
+    length). Returns plain text. Falls back to the original on any failure or if
+    the model returns something shorter than the input.
+    """
+    script = (script or "").strip()
+    if not script:
+        return script
+
+    word_count = len(script.split())
+    if word_count >= target_words:
+        return script
+
+    prompt = f"""
+# Role: Story Expander
+
+## Goal:
+Rewrite and expand the first-person story below to about {target_words} words so it makes a longer voiceover, WITHOUT changing the situation, facts, names, or the narrator's point of view.
+
+## Constraints:
+1. Keep it first person and in the same casual Reddit "AITA" tone.
+2. Add natural detail, inner thoughts and a bit more context, but never contradict the original.
+3. Keep the opening question/hook as the first sentence.
+4. Do not add a title, labels, markdown, quotation marks, or narrator indicators. Return only the raw story text.
+5. Do not reference this prompt.
+
+## Story:
+{script}
+""".strip()
+
+    try:
+        for i in range(_max_retries):
+            response = _generate_response(prompt=prompt)
+            if response:
+                cleaned = response.replace("*", "").replace("#", "").strip()
+                cleaned = re.sub(r'^["“]|["”]$', "", cleaned).strip()
+                if len(cleaned.split()) >= word_count:
+                    logger.success(
+                        f"expanded script from {word_count} to {len(cleaned.split())} words"
+                    )
+                    return cleaned
+            logger.warning(f"failed to expand script, trying again... {i + 1}")
+    except Exception as e:
+        logger.error(f"failed to expand script: {e}")
+
+    return script
+
+
 def generate_terms(video_subject: str, video_script: str, amount: int = 5) -> List[str]:
     prompt = f"""
 # Role: Video Search Terms Generator

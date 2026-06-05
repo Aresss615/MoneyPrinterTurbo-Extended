@@ -72,6 +72,7 @@ class TestRunLocalFacelessVideo(unittest.TestCase):
                         "AITA for telling my roommate to stop eating my food?",
                         "--task-id",
                         "unit-task",
+                        "--no-expand",
                     ]
                 )
 

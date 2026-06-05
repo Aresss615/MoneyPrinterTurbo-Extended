@@ -4,6 +4,7 @@ import glob
 import itertools
 import math
 import os
+import re
 import random
 import gc
 import shutil
@@ -23,7 +24,7 @@ from moviepy import (
     concatenate_videoclips,
 )
 from moviepy.video.tools.subtitles import SubtitlesClip
-from PIL import ImageFont, ImageDraw, Image
+from PIL import ImageFont, ImageDraw, Image, ImageFilter
 
 from app.models import const
 from app.models.schema import (
@@ -74,6 +75,41 @@ class SubClippedVideoClip:
         return f"SubClippedVideoClip(file_path={self.file_path}, start_time={self.start_time}, end_time={self.end_time}, duration={self.duration}, width={self.width}, height={self.height})"
 
 
+def _normalize_word(word: str) -> str:
+    """Lowercase and strip all non-alphanumeric characters for matching."""
+    return re.sub(r"[^0-9a-z]+", "", (word or "").lower())
+
+
+def align_spoken_words(text_words, spoken_words):
+    """Map each spoken word (in order) to its index in ``text_words``.
+
+    Uses a forward-advancing pointer so repeated words highlight the correct
+    occurrence (e.g. the second spoken "the" maps to the second "the" in the
+    text, not the first). Punctuation/case are ignored. Returns a list the same
+    length as ``spoken_words``; entries are -1 when no match exists, and fall
+    back to any earlier occurrence when there is no remaining forward match.
+    """
+    norm_text = [_normalize_word(w) for w in text_words]
+    result = []
+    pointer = 0
+    for spoken in spoken_words:
+        target = _normalize_word(spoken)
+        idx = -1
+        if target:
+            for j in range(pointer, len(norm_text)):
+                if norm_text[j] == target:
+                    idx = j
+                    pointer = j + 1
+                    break
+            if idx == -1:
+                for j, tw in enumerate(norm_text):
+                    if tw == target:
+                        idx = j
+                        break
+        result.append(idx)
+    return result
+
+
 def sequential_subclips_needed(audio_duration: float, max_clip_duration: int) -> int:
     """How many consecutive max-length subclips are needed to cover the audio.
 
@@ -120,57 +156,84 @@ def _wrap_text_pixels(text: str, font, max_width: int) -> list:
     return lines
 
 
+def _text_width(font, text: str) -> float:
+    try:
+        return font.getlength(text)
+    except Exception:
+        return font.getbbox(text)[2]
+
+
 def create_comment_card_image(
     width: int,
     username: str,
     title: str,
     font_path: str,
     likes: str = "99+",
+    comments: str = "12",
     verified: bool = True,
 ):
     """Render a Reddit/TikTok-style comment card as an RGBA PIL image.
 
-    The card has a translucent dark rounded background with an avatar, the
-    username and a verified badge, the wrapped title text, and a like/share
-    footer row. Height grows with the wrapped title so longer titles fit.
+    Matches the reference card: a translucent dark rounded panel with a drop
+    shadow, an avatar, the username + verified badge, a "now playing" music
+    chip, a row of reaction emojis, the wrapped title, and a like / comment /
+    share footer row. The overall image width equals ``width`` (the card is
+    inset to leave room for the shadow); height grows with the wrapped title.
     """
-    pad = int(width * 0.045)
-    avatar_d = int(width * 0.11)
-    username_size = max(14, int(width * 0.044))
-    title_size = max(16, int(width * 0.062))
-    footer_size = max(13, int(width * 0.040))
+    shadow_pad = max(6, int(width * 0.028))
+    card_w = width - 2 * shadow_pad
+
+    pad = int(card_w * 0.05)
+    avatar_d = int(card_w * 0.115)
+    username_size = max(14, int(card_w * 0.046))
+    title_size = max(16, int(card_w * 0.064))
+    footer_size = max(13, int(card_w * 0.042))
+    emoji_size = max(14, int(card_w * 0.05))
 
     username_font = _load_font(font_path, username_size)
     title_font = _load_font(font_path, title_size)
     footer_font = _load_font(font_path, footer_size)
+    chip_font = _load_font(font_path, max(12, int(card_w * 0.034)))
 
-    text_left = pad + avatar_d + int(width * 0.03)
-    title_max_width = width - 2 * pad
+    text_left = pad + avatar_d + int(card_w * 0.03)
+    title_max_width = card_w - 2 * pad
     title_lines = _wrap_text_pixels(title, title_font, title_max_width)
 
-    line_gap = int(title_size * 0.30)
+    line_gap = int(title_size * 0.32)
     title_line_h = title_size + line_gap
     title_block_h = title_line_h * len(title_lines)
 
     header_h = avatar_d
+    reactions_h = emoji_size
     footer_h = int(footer_size * 1.8)
-    inner_gap = int(width * 0.035)
+    gap = int(card_w * 0.03)
 
-    height = pad + header_h + inner_gap + title_block_h + inner_gap + footer_h + pad
+    card_h = pad + header_h + gap + reactions_h + gap + title_block_h + gap + footer_h + pad
+    img_h = card_h + 2 * shadow_pad
 
-    img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
+    img = Image.new("RGBA", (width, img_h), (0, 0, 0, 0))
+    radius = int(card_w * 0.055)
 
-    # Card background
-    radius = int(width * 0.05)
-    draw.rounded_rectangle(
-        [0, 0, width - 1, height - 1], radius=radius, fill=(18, 18, 22, 235)
+    # Drop shadow
+    shadow = Image.new("RGBA", (width, img_h), (0, 0, 0, 0))
+    sdraw = ImageDraw.Draw(shadow)
+    sdraw.rounded_rectangle(
+        [shadow_pad, shadow_pad + int(shadow_pad * 0.4),
+         shadow_pad + card_w, shadow_pad + card_h + int(shadow_pad * 0.4)],
+        radius=radius, fill=(0, 0, 0, 150),
     )
+    shadow = shadow.filter(ImageFilter.GaussianBlur(shadow_pad * 0.7))
+    img.alpha_composite(shadow)
+
+    # Card body drawn on its own layer, then pasted at the shadow offset
+    card = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(card)
+    draw.rounded_rectangle([0, 0, card_w - 1, card_h - 1], radius=radius, fill=(18, 18, 22, 240))
 
     # Avatar (gray disc with a simple person silhouette)
     ax0, ay0 = pad, pad
     ax1, ay1 = pad + avatar_d, pad + avatar_d
-    draw.ellipse([ax0, ay0, ax1, ay1], fill=(120, 124, 132, 255))
+    draw.ellipse([ax0, ay0, ax1, ay1], fill=(122, 126, 135, 255))
     head_r = avatar_d * 0.18
     cx = (ax0 + ax1) / 2
     draw.ellipse(
@@ -182,60 +245,57 @@ def create_comment_card_image(
         fill=(60, 63, 70, 255),
     )
 
-    # Username
-    uname_y = pad + (avatar_d - username_size) // 2
-    draw.text((text_left, uname_y), username, font=username_font, fill=(235, 235, 240, 255))
-
-    # Verified badge (blue disc + white check)
-    try:
-        uname_w = username_font.getlength(username)
-    except Exception:
-        uname_w = username_font.getbbox(username)[2]
+    # Username + verified badge
+    uname_y = pad + (avatar_d - username_size) // 2 - int(username_size * 0.15)
+    draw.text((text_left, uname_y), username, font=username_font, fill=(236, 236, 240, 255))
+    uname_w = _text_width(username_font, username)
     if verified:
         badge_d = int(username_size * 0.95)
-        bx = text_left + uname_w + int(width * 0.02)
-        by = uname_y + (username_size - badge_d) // 2
+        bx = int(text_left + uname_w + card_w * 0.02)
+        by = int(uname_y + (username_size - badge_d) // 2)
         draw.ellipse([bx, by, bx + badge_d, by + badge_d], fill=(64, 150, 255, 255))
         draw.line(
-            [
-                (bx + badge_d * 0.27, by + badge_d * 0.52),
-                (bx + badge_d * 0.43, by + badge_d * 0.68),
-                (bx + badge_d * 0.75, by + badge_d * 0.32),
-            ],
-            fill=(255, 255, 255, 255),
-            width=max(2, badge_d // 8),
-            joint="curve",
+            [(bx + badge_d * 0.27, by + badge_d * 0.52),
+             (bx + badge_d * 0.43, by + badge_d * 0.68),
+             (bx + badge_d * 0.75, by + badge_d * 0.32)],
+            fill=(255, 255, 255, 255), width=max(2, badge_d // 8), joint="curve",
         )
 
+    # Now-playing music chip (top-right)
+    _draw_music_chip(draw, card_w - pad, pad, chip_font, "0:09", card_w)
+
+    # Reaction emoji row
+    ry = pad + header_h + gap
+    _draw_reactions(card, text_left, ry, emoji_size)
+
     # Title
-    ty = pad + header_h + inner_gap
+    ty = pad + header_h + gap + reactions_h + gap
     for line in title_lines:
-        draw.text((pad, ty), line, font=title_font, fill=(245, 245, 248, 255))
+        draw.text((pad, ty), line, font=title_font, fill=(246, 246, 249, 255))
         ty += title_line_h
 
-    # Footer: heart + likes, and Share on the right
-    fy = height - pad - footer_h
-    heart_size = int(footer_size * 1.0)
-    hx, hy = pad, fy + (footer_h - heart_size) // 2
-    _draw_heart(draw, hx, hy, heart_size, fill=(255, 90, 95, 255))
-    draw.text(
-        (hx + heart_size + int(width * 0.015), fy + (footer_h - footer_size) // 2),
-        likes,
-        font=footer_font,
-        fill=(200, 200, 205, 255),
-    )
-    share_text = "Share"
-    try:
-        share_w = footer_font.getlength(share_text)
-    except Exception:
-        share_w = footer_font.getbbox(share_text)[2]
-    draw.text(
-        (width - pad - share_w, fy + (footer_h - footer_size) // 2),
-        share_text,
-        font=footer_font,
-        fill=(200, 200, 205, 255),
-    )
+    # Footer: heart + likes, speech bubble + comments, share on the right
+    fy = card_h - pad - footer_h
+    icon = int(footer_size * 1.05)
+    fcolor = (205, 205, 210, 255)
+    cy = fy + (footer_h - footer_size) // 2
 
+    hx = pad
+    _draw_heart(draw, hx, fy + (footer_h - icon) // 2, icon, fill=(255, 92, 97, 255))
+    draw.text((hx + icon + int(card_w * 0.015), cy), likes, font=footer_font, fill=fcolor)
+
+    bx = int(hx + icon + int(card_w * 0.015) + _text_width(footer_font, likes) + card_w * 0.05)
+    _draw_speech_bubble(draw, bx, fy + (footer_h - icon) // 2, icon, fcolor)
+    draw.text((bx + icon + int(card_w * 0.015), cy), comments, font=footer_font, fill=fcolor)
+
+    share_text = "Share"
+    share_w = _text_width(footer_font, share_text)
+    arrow = int(footer_size * 0.95)
+    sx = int(card_w - pad - share_w)
+    _draw_share_arrow(draw, sx - arrow - int(card_w * 0.012), fy + (footer_h - arrow) // 2, arrow, fcolor)
+    draw.text((sx, cy), share_text, font=footer_font, fill=fcolor)
+
+    img.alpha_composite(card, (shadow_pad, shadow_pad))
     return img
 
 
@@ -244,10 +304,72 @@ def _draw_heart(draw, x, y, size, fill):
     r = size / 4
     draw.ellipse([x, y, x + 2 * r, y + 2 * r], fill=fill)
     draw.ellipse([x + 2 * r, y, x + 4 * r, y + 2 * r], fill=fill)
-    draw.polygon(
-        [(x, y + r), (x + 2 * r, y + size), (x + 4 * r, y + r)],
-        fill=fill,
-    )
+    draw.polygon([(x, y + r), (x + 2 * r, y + size), (x + 4 * r, y + r)], fill=fill)
+
+
+def _draw_speech_bubble(draw, x, y, size, color):
+    """Draw a small outlined speech bubble (comment icon)."""
+    w = max(2, size // 9)
+    draw.rounded_rectangle([x, y, x + size, y + size * 0.78], radius=size // 4, outline=color, width=w)
+    draw.polygon([(x + size * 0.25, y + size * 0.78),
+                  (x + size * 0.25, y + size),
+                  (x + size * 0.5, y + size * 0.78)], fill=color)
+
+
+def _draw_share_arrow(draw, x, y, size, color):
+    """Draw a small share/reply arrow."""
+    w = max(2, size // 8)
+    draw.arc([x, y + size * 0.15, x + size, y + size * 1.1], start=200, end=340, fill=color, width=w)
+    draw.line([(x + size * 0.5, y), (x + size, y + size * 0.32), (x + size * 0.5, y + size * 0.62)],
+              fill=color, width=w, joint="curve")
+
+
+def _draw_music_chip(draw, right_x, top_y, font, text, card_w):
+    """Draw a rounded 'now playing' chip with a music note, right-aligned at right_x."""
+    note_d = max(6, int(card_w * 0.02))
+    text_w = _text_width(font, text)
+    inner_pad = int(card_w * 0.018)
+    gap = int(card_w * 0.012)
+    chip_w = int(inner_pad + note_d * 1.8 + gap + text_w + inner_pad)
+    chip_h = int(max(note_d * 2.4, _text_width(font, "0") and font.size * 1.6))
+    x0 = int(right_x - chip_w)
+    y0 = top_y
+    draw.rounded_rectangle([x0, y0, x0 + chip_w, y0 + chip_h], radius=chip_h // 2, fill=(44, 44, 50, 235))
+    # music note: head + stem
+    nx = x0 + inner_pad
+    ny = y0 + chip_h // 2
+    draw.ellipse([nx, ny, nx + note_d, ny + note_d * 0.8], fill=(235, 235, 240, 255))
+    stem_x = nx + note_d - max(1, note_d // 6)
+    draw.line([(stem_x, ny + note_d * 0.4), (stem_x, ny - note_d)], fill=(235, 235, 240, 255), width=max(2, note_d // 5))
+    draw.line([(stem_x, ny - note_d), (stem_x + note_d * 0.6, ny - note_d * 0.7)], fill=(235, 235, 240, 255), width=max(2, note_d // 5))
+    draw.text((nx + note_d * 1.8 + gap, y0 + (chip_h - font.size) // 2), text, font=font, fill=(225, 225, 230, 255))
+
+
+def _draw_reactions(card_img, x, y, size):
+    """Draw a small row of reaction emojis (smile, surprise, heart)."""
+    draw = ImageDraw.Draw(card_img)
+    yellow = (255, 199, 64, 255)
+    dark = (60, 50, 20, 255)
+    step = int(size * 1.18)
+
+    # smiley
+    cx = x
+    draw.ellipse([cx, y, cx + size, y + size], fill=yellow)
+    er = size * 0.10
+    draw.ellipse([cx + size * 0.30 - er, y + size * 0.36 - er, cx + size * 0.30 + er, y + size * 0.36 + er], fill=dark)
+    draw.ellipse([cx + size * 0.70 - er, y + size * 0.36 - er, cx + size * 0.70 + er, y + size * 0.36 + er], fill=dark)
+    draw.arc([cx + size * 0.25, y + size * 0.35, cx + size * 0.75, y + size * 0.80], start=20, end=160, fill=dark, width=max(2, size // 12))
+
+    # surprised (O mouth)
+    cx = x + step
+    draw.ellipse([cx, y, cx + size, y + size], fill=yellow)
+    draw.ellipse([cx + size * 0.30 - er, y + size * 0.34 - er, cx + size * 0.30 + er, y + size * 0.34 + er], fill=dark)
+    draw.ellipse([cx + size * 0.70 - er, y + size * 0.34 - er, cx + size * 0.70 + er, y + size * 0.34 + er], fill=dark)
+    draw.ellipse([cx + size * 0.40, y + size * 0.55, cx + size * 0.60, y + size * 0.80], outline=dark, width=max(2, size // 12))
+
+    # heart reaction
+    cx = x + 2 * step
+    _draw_heart(draw, cx, int(y + size * 0.12), int(size * 0.82), fill=(255, 92, 97, 255))
 
 
 def create_comment_card_clip(params, video_width: int, video_height: int, font_path: str):
@@ -264,6 +386,7 @@ def create_comment_card_clip(params, video_width: int, video_height: int, font_p
 
     username = getattr(params, "comment_card_username", None) or "u/throwaway"
     likes = getattr(params, "comment_card_likes", None) or "99+"
+    comments = getattr(params, "comment_card_comments", None) or "12"
     duration = float(getattr(params, "comment_card_duration", 4.0) or 4.0)
 
     card_width = int(video_width * 0.86)
@@ -273,6 +396,7 @@ def create_comment_card_clip(params, video_width: int, video_height: int, font_p
         title=title,
         font_path=font_path,
         likes=likes,
+        comments=comments,
     )
 
     clip = ImageClip(np.array(card_img)).with_start(0).with_duration(duration)
@@ -384,11 +508,17 @@ def combine_videos(
     max_clip_duration: int = 5,
     threads: int = 2,
     script: str = "",
-    params: VideoParams = None
+    params: VideoParams = None,
+    min_video_duration: float = 0,
 ) -> str:
     audio_clip = AudioFileClip(audio_file)
     audio_duration = audio_clip.duration
     logger.info(f"audio duration: {audio_duration} seconds")
+    # Build gameplay to at least this long; lets the video run past the
+    # narration (e.g. to satisfy a platform minimum length) with a silent tail.
+    target_duration = max(audio_duration, float(min_video_duration or 0))
+    if target_duration > audio_duration:
+        logger.info(f"target video duration (min length): {target_duration} seconds")
     # Required duration of each clip
     req_dur = audio_duration / len(video_paths)
     req_dur = max_clip_duration
@@ -442,7 +572,7 @@ def combine_videos(
         
         for i, selection in enumerate(selected_videos):
             # Don't break early when max_video_reuse=1 to utilize all selected videos
-            if video_duration > audio_duration and not (max_reuse_limit and max_reuse_limit == 1):
+            if video_duration > target_duration and not (max_reuse_limit and max_reuse_limit == 1):
                 break
                 
             video_path = selection['video_path']
@@ -532,7 +662,7 @@ def combine_videos(
                     # Collect enough consecutive subclips to cover the narration
                     # instead of stopping after the first one, which left long
                     # audio with only a few seconds of footage (black thereafter).
-                    if len(subclipped_items) >= sequential_subclips_needed(audio_duration, max_clip_duration):
+                    if len(subclipped_items) >= sequential_subclips_needed(target_duration, max_clip_duration):
                         break
 
         # random subclipped_items order
@@ -543,7 +673,7 @@ def combine_videos(
         
         # Add downloaded clips over and over until the duration of the audio (max_duration) has been reached
         for i, subclipped_item in enumerate(subclipped_items):
-            if video_duration > audio_duration:
+            if video_duration > target_duration:
                 break
             
             logger.debug(f"processing clip {i+1}: {subclipped_item.width}x{subclipped_item.height}, current duration: {video_duration:.2f}s, remaining: {audio_duration - video_duration:.2f}s")
@@ -605,7 +735,7 @@ def combine_videos(
                 logger.error(f"failed to process clip: {str(e)}")
     
     # loop processed clips until the video duration matches or exceeds the audio duration.
-    if video_duration < audio_duration:
+    if video_duration < target_duration:
         # Check if we should respect max_video_reuse setting (already defined for semantic mode)
         if 'max_reuse_limit' not in locals():
             max_reuse_limit = params.max_video_reuse if params and hasattr(params, 'max_video_reuse') and params.max_video_reuse is not None else None
@@ -632,7 +762,7 @@ def combine_videos(
                 clips_added = 0
                 
                 for clip_idx, clip in clip_cycle:
-                    if video_duration >= audio_duration:
+                    if video_duration >= target_duration:
                         break
                     
                     # Check if this clip has reached the reuse limit
@@ -655,7 +785,7 @@ def combine_videos(
                 # Original unlimited looping behavior
                 base_clips = processed_clips.copy()
                 for clip in itertools.cycle(base_clips):
-                    if video_duration >= audio_duration:
+                    if video_duration >= target_duration:
                         break
                     processed_clips.append(clip)
                     video_duration += clip.duration
@@ -1027,24 +1157,24 @@ def create_enhanced_subtitle_clips(enhanced_subtitle_path, params, video_width, 
         for line in text.split('\n'):
             text_words.extend(line.split())
         
+        # Map spoken words to text indices in sequence so repeated words
+        # highlight the correct occurrence instead of always the first one.
+        aligned_indices = align_spoken_words(
+            text_words, [w['word'] for w in sorted_words]
+        )
+
         # Create time segments with word highlighting
         current_time = start_time
-        
-        for word_data in sorted_words:
+
+        for word_pos, word_data in enumerate(sorted_words):
             word_start = max(word_data['start'], start_time)
             word_end = min(word_data['end'], end_time)
-            word_text = word_data['word'].strip()
-            
+
             if word_start >= word_end:
                 continue
-            
-            # Find word index in text
-            word_index = -1
-            for idx, text_word in enumerate(text_words):
-                if text_word.strip().lower() == word_text.lower():
-                    word_index = idx
-                    break
-            
+
+            word_index = aligned_indices[word_pos]
+
             # Create segment before word (normal colors)
             if word_start > current_time:
                 clip = create_subtitle_clip(text, set(), current_time, word_start - current_time, params)

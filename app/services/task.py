@@ -222,6 +222,7 @@ def generate_final_videos(
             threads=params.n_threads,
             script=video_script,
             params=params,
+            min_video_duration=getattr(params, "min_video_duration", 0) or 0,
         )
 
         _progress += 50 / params.video_count / 2

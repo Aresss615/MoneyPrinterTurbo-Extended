@@ -118,7 +118,12 @@ class VideoParams(BaseModel):
     comment_card_username: Optional[str] = "u/throwaway"
     comment_card_title: Optional[str] = ""  # falls back to video_subject
     comment_card_likes: Optional[str] = "99+"
+    comment_card_comments: Optional[str] = "12"
     comment_card_duration: Optional[float] = 4.0  # seconds shown at the start
+
+    # Minimum final video length in seconds (gameplay continues past the
+    # narration to reach this length; 0 = match narration only).
+    min_video_duration: Optional[float] = 0
 
     # Semantic video settings
     segmentation_method: Optional[str] = "sentences"
