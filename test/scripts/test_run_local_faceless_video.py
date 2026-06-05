@@ -13,13 +13,18 @@ if str(ROOT_DIR) not in sys.path:
 
 
 class TestRunLocalFacelessVideo(unittest.TestCase):
-    def test_build_video_params_uses_local_chatterbox_defaults(self):
+    def test_build_video_params_rotates_local_source_and_pooled_voice(self):
+        import random as random_module
+
+        from app.services import creator_console
         from scripts import run_local_faceless_video as runner
 
-        params = runner.build_video_params("  AITA for labeling my leftovers?  ")
+        params = runner.build_video_params(
+            "  AITA for labeling my leftovers?  ", rng=random_module.Random(5)
+        )
 
         self.assertEqual(params.video_script, "AITA for labeling my leftovers?")
-        self.assertEqual(params.voice_name, "chatterbox:default:Default Voice-Neutral")
+        self.assertIn(params.voice_name, creator_console.VOICE_POOL)
         self.assertEqual(params.video_source, "local")
         self.assertEqual(params.video_aspect, "9:16")
         self.assertEqual(params.video_concat_mode, "sequential")
@@ -28,7 +33,8 @@ class TestRunLocalFacelessVideo(unittest.TestCase):
         self.assertTrue(params.enable_word_highlighting)
         self.assertEqual(len(params.video_materials), 1)
         self.assertEqual(params.video_materials[0].provider, "local")
-        self.assertTrue(params.video_materials[0].url.endswith("gameplay/minecraft-parkour-1.mp4"))
+        discovered = {str(p) for p in creator_console.list_background_sources()}
+        self.assertIn(params.video_materials[0].url, discovered)
 
     def test_build_video_params_enables_reddit_card_and_center_captions(self):
         from scripts import run_local_faceless_video as runner
@@ -80,9 +86,11 @@ class TestRunLocalFacelessVideo(unittest.TestCase):
         start.assert_called_once()
         self.assertEqual(start.call_args.kwargs["task_id"], "unit-task")
         self.assertEqual(start.call_args.kwargs["stop_at"], "video")
-        self.assertEqual(
-            start.call_args.kwargs["params"].video_materials[0].url,
-            str(ROOT_DIR / "gameplay/minecraft-parkour-1.mp4"),
+        from app.services import creator_console
+
+        discovered = {str(p) for p in creator_console.list_background_sources()}
+        self.assertIn(
+            start.call_args.kwargs["params"].video_materials[0].url, discovered
         )
 
         output = json.loads(stdout.getvalue())

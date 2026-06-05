@@ -1,0 +1,140 @@
+import json
+import os
+from typing import Optional
+
+from fastapi import Request
+from fastapi.responses import HTMLResponse
+from loguru import logger
+from pydantic import BaseModel
+
+from app.controllers import base
+from app.controllers.v1.base import new_router
+from app.models.exception import HttpException
+from app.services import tiktok
+from app.utils import utils
+
+
+router = new_router()
+
+
+def _load_story_metadata(task_id: str) -> dict:
+    story_path = os.path.join(utils.task_dir(task_id), "story.json")
+    if not os.path.isfile(story_path):
+        return {}
+    try:
+        with open(story_path, "r", encoding="utf-8") as fp:
+            return json.load(fp)
+    except (ValueError, OSError):
+        return {}
+
+
+class PublishRequest(BaseModel):
+    task_id: str
+    title: Optional[str] = None
+    description: Optional[str] = None
+    hashtags: Optional[list[str]] = None
+    privacy: Optional[str] = None
+    cover_timestamp_ms: Optional[int] = None
+    poll: bool = True
+
+
+def _final_video_path(task_id: str) -> str:
+    return os.path.join(utils.task_dir(task_id), "final-1.mp4")
+
+
+@router.get("/tiktok/status", summary="Report TikTok connection status")
+def tiktok_status(request: Request):
+    configured = tiktok.is_configured()
+    cache = tiktok.load_token_cache()
+    connected = bool(cache.get("access_token"))
+    nickname = ""
+    if connected:
+        try:
+            info = tiktok.query_creator_info()
+            nickname = info.get("creator_nickname", "")
+        except Exception as exc:  # network/token issues shouldn't 500 the pill
+            logger.warning(f"tiktok creator_info failed: {exc}")
+    return utils.get_response(
+        200,
+        {
+            "configured": configured,
+            "connected": connected,
+            "nickname": nickname,
+            "privacy_level": tiktok.config.tiktok.get(
+                "privacy_level", tiktok.DEFAULT_PRIVACY
+            ),
+        },
+    )
+
+
+@router.get("/tiktok/auth-url", summary="Get the TikTok authorization URL")
+def tiktok_auth_url(request: Request):
+    request_id = base.get_task_id(request)
+    try:
+        url = tiktok.build_authorize_url(state=utils.get_uuid())
+    except tiktok.TikTokError as exc:
+        raise HttpException(task_id=request_id, status_code=400, message=str(exc))
+    return utils.get_response(200, {"auth_url": url})
+
+
+@router.get("/tiktok/callback", summary="TikTok OAuth redirect callback")
+def tiktok_callback(request: Request, code: str = "", state: str = "", error: str = ""):
+    if error:
+        return HTMLResponse(
+            f"<h2>TikTok authorization failed</h2><p>{error}</p>", status_code=400
+        )
+    if not code:
+        return HTMLResponse(
+            "<h2>TikTok authorization failed</h2><p>missing code</p>", status_code=400
+        )
+    try:
+        cache = tiktok.exchange_code_for_token(code)
+    except tiktok.TikTokError as exc:
+        return HTMLResponse(
+            f"<h2>TikTok authorization failed</h2><p>{exc}</p>", status_code=400
+        )
+    open_id = cache.get("open_id", "")
+    return HTMLResponse(
+        "<h2>TikTok connected</h2>"
+        f"<p>open_id: {open_id}</p>"
+        "<p>You can close this tab and return to the creator console.</p>"
+    )
+
+
+@router.post("/tiktok/publish", summary="Publish a finished video to TikTok")
+def tiktok_publish(request: Request, body: PublishRequest):
+    request_id = base.get_task_id(request)
+    video_path = _final_video_path(body.task_id)
+    if not os.path.isfile(video_path):
+        raise HttpException(
+            task_id=body.task_id,
+            status_code=404,
+            message=f"finished video not found for task {body.task_id}",
+        )
+
+    # Fall back to the story metadata persisted at submission time.
+    metadata = _load_story_metadata(body.task_id)
+    description = body.description
+    if description is None:
+        description = metadata.get("suggested_description") or metadata.get(
+            "comment_card_title", ""
+        )
+    hashtags = body.hashtags
+    if hashtags is None:
+        hashtags = metadata.get("suggested_hashtags") or []
+
+    try:
+        result = tiktok.publish_video(
+            video_path,
+            title=body.title,
+            description=description,
+            hashtags=hashtags,
+            privacy=body.privacy,
+            cover_timestamp_ms=body.cover_timestamp_ms,
+            poll=body.poll,
+        )
+    except tiktok.TikTokError as exc:
+        raise HttpException(
+            task_id=body.task_id, status_code=400, message=str(exc)
+        )
+    return utils.get_response(200, result)

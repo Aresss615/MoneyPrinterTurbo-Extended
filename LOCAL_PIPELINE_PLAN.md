@@ -2,7 +2,7 @@
 
 ## Summary
 
-Set up a local-only faceless-video pipeline from `Asad-Ismail/MoneyPrinterTurbo-Extended` in `/Users/jc/dev/projects/MoneyPrinterTurbo-Extended`, using the GitHub fork, UV-managed Python 3.11, local Chatterbox TTS, local Ollama `qwen3:8b`, word-by-word caption highlighting, and the copied gameplay file `gameplay/minecraft-parkour-1.mp4`.
+Set up a local-only faceless-video pipeline from `Asad-Ismail/MoneyPrinterTurbo-Extended` in `/Users/jc/dev/projects/MoneyPrinterTurbo-Extended`, using the GitHub fork, UV-managed Python 3.11, local Chatterbox TTS, local Ollama `qwen3:8b`, word-by-word caption highlighting, and the copied gameplay file `gameplay/minecraft-parkour-1-vertical.mp4`.
 
 Reference repo: https://github.com/Asad-Ismail/MoneyPrinterTurbo-Extended
 
@@ -21,8 +21,8 @@ Chatterbox install reference: https://github.com/resemble-ai/chatterbox
   - Install dependencies with UV only: `uv pip install -r requirements.txt` plus `uv pip install chatterbox-tts whisperx torchaudio toml`.
 - Copy gameplay into repo:
   - Create `gameplay/`.
-  - Copy `/Users/jc/dev/projects/minecraft-parkour-1.mp4` to `gameplay/minecraft-parkour-1.mp4`.
-  - Add `gameplay/` to `.git/info/exclude` so the 3.3GB file is not committed.
+  - Copy `/Users/jc/dev/projects/minecraft-parkour-1-vertical.mp4` to `gameplay/minecraft-parkour-1-vertical.mp4`.
+  - Add `gameplay/` to `.git/info/exclude` so the large gameplay files are not committed.
 - Add local glue/config:
   - Create `LOCAL_PIPELINE_PLAN.md` in the repo with this plan.
   - Create/update `config.toml` from `config.example.toml`.
@@ -33,7 +33,7 @@ Chatterbox install reference: https://github.com/resemble-ai/chatterbox
   - `video_script`: the supplied AITA story text.
   - `voice_name = "chatterbox:default:Default Voice-Neutral"`.
   - `video_source = "local"`.
-  - `video_materials = [{ provider = "local", url = "<repo>/gameplay/minecraft-parkour-1.mp4" }]`.
+  - `video_materials = [{ provider = "local", url = "<repo>/gameplay/minecraft-parkour-1-vertical.mp4" }]`.
   - `video_aspect = "9:16"`, `video_concat_mode = "sequential"`, `bgm_type = ""`, `subtitle_enabled = true`, `enable_word_highlighting = true`.
 
 ## Verification Steps

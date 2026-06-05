@@ -26,3 +26,5 @@ node_modules
 
 venv/
 .venv
+# Local Claude Code agent state
+.claude/

@@ -70,6 +70,11 @@ def save_script_data(task_id, video_script, video_terms, params):
         f.write(utils.to_json(script_data))
 
 
+# Local, offline fallback voice used when the primary (e.g. cloud Edge-TTS)
+# voice fails, so a render never dies on a transient TTS outage.
+FALLBACK_VOICE_NAME = "chatterbox:default:Default Voice-Neutral"
+
+
 def generate_audio(task_id, params, video_script):
     logger.info("\n\n## generating audio")
     audio_file = path.join(utils.task_dir(task_id), "audio.mp3")
@@ -79,6 +84,18 @@ def generate_audio(task_id, params, video_script):
         voice_rate=params.voice_rate,
         voice_file=audio_file,
     )
+    if sub_maker is None and not voice.is_chatterbox_voice(params.voice_name):
+        logger.warning(
+            f"voice '{params.voice_name}' failed; "
+            f"falling back to local Chatterbox ({FALLBACK_VOICE_NAME})"
+        )
+        params.voice_name = FALLBACK_VOICE_NAME
+        sub_maker = voice.tts(
+            text=video_script,
+            voice_name=voice.parse_voice_name(FALLBACK_VOICE_NAME),
+            voice_rate=params.voice_rate,
+            voice_file=audio_file,
+        )
     if sub_maker is None:
         sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
         logger.error(

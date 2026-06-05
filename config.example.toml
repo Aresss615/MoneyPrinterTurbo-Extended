@@ -218,3 +218,20 @@ api_key = ""
 # 是否隐藏日志信息
 # Whether to hide logs in the UI
 hide_log = false
+
+[tiktok]
+# TikTok Content Posting API (Direct Post) credentials.
+# Register an app at https://developers.tiktok.com, add the "Content Posting API"
+# product, and request the video.publish + video.upload scopes. See SETUP_NOTES.md.
+client_key = ""
+client_secret = ""
+# Must exactly match a redirect URI registered on your TikTok app.
+redirect_uri = "http://127.0.0.1:8080/api/v1/tiktok/callback"
+# Unaudited apps can only post privately (SELF_ONLY). After TikTok audits your
+# app you may change this to PUBLIC_TO_EVERYONE (no code change needed).
+privacy_level = "SELF_ONLY"
+disable_comment = false
+disable_duet = false
+disable_stitch = false
+# Frame (in milliseconds) used for the auto-generated cover thumbnail.
+cover_timestamp_ms = 1000

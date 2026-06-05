@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import random
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -10,19 +11,18 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from app.models.schema import MaterialInfo, VideoParams
+from app.models.schema import VideoParams
+from app.services import creator_console
 from app.services import task as task_service
 from app.utils import utils
 
 
-DEFAULT_VOICE_NAME = "chatterbox:default:Default Voice-Neutral"
 DEFAULT_CARD_USERNAME = "u/throwaway_aita"
 CAPTION_FONT = "Montserrat-ExtraBold.ttf"
 MIN_VIDEO_SECONDS = 60.0  # TikTok monetization minimum
-# Chatterbox narrates ~4 words/sec, so ~270 words ≈ 65s (margin over the 60s
+# Edge-TTS narrates ~2.8 words/sec, so ~270 words ≈ 95s (margin over the 60s
 # minimum). Padding (min_video_duration) covers any shortfall.
 TARGET_NARRATION_WORDS = 270
-GAMEPLAY_PATH = ROOT_DIR / "gameplay" / "minecraft-parkour-1.mp4"
 
 
 def derive_card_title(story: str, max_chars: int = 140) -> str:
@@ -37,13 +37,12 @@ def derive_card_title(story: str, max_chars: int = 140) -> str:
     return story
 
 
-def build_video_params(story: str, card_username: str = DEFAULT_CARD_USERNAME) -> VideoParams:
+def build_video_params(
+    story: str, card_username: str = DEFAULT_CARD_USERNAME, rng=random
+) -> VideoParams:
     story = story.strip()
     if not story:
         raise ValueError("story must not be empty")
-
-    if not GAMEPLAY_PATH.exists():
-        raise FileNotFoundError(f"missing local gameplay file: {GAMEPLAY_PATH}")
 
     return VideoParams(
         video_subject="AITA story",
@@ -55,11 +54,9 @@ def build_video_params(story: str, card_username: str = DEFAULT_CARD_USERNAME) -
         video_clip_duration=5,
         video_count=1,
         video_source="local",
-        video_materials=[
-            MaterialInfo(provider="local", url=str(GAMEPLAY_PATH), duration=0)
-        ],
+        video_materials=[creator_console.pick_background_material(rng)],
         video_language="en",
-        voice_name=DEFAULT_VOICE_NAME,
+        voice_name=creator_console.pick_voice(rng),
         voice_volume=1.0,
         voice_rate=1.0,
         bgm_type="",

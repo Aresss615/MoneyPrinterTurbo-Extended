@@ -118,6 +118,9 @@ source ./setup_cuda_env.sh
 
 **Usage:**
 ```bash
+# Creator Console for Reddit-style shorts
+./creator.sh
+
 # Web Interface (Recommended)
 ./webui.sh            
 
@@ -127,7 +130,15 @@ export CHATTERBOX_CFG_WEIGHT=0.2  # Slow (default)
 export CHATTERBOX_CFG_WEIGHT=0.3  # Normal speed
 ```
 
-The web interface opens at `http://localhost:8501`
+The Creator Console opens at `http://127.0.0.1:8080/`. The original Streamlit web interface opens at `http://localhost:8501`.
+
+Optional Creator Console launch settings:
+
+```bash
+./creator.sh --open          # start the app and open your browser
+PORT=8081 ./creator.sh       # use a different port
+HOST=0.0.0.0 ./creator.sh    # bind on all network interfaces
+```
 
 ## 🔧 Troubleshooting
 

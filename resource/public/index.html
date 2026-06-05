@@ -2,18 +2,207 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>MoneyPrinterTurbo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JC Video Factory</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23111827'/%3E%3Ctext x='32' y='39' text-anchor='middle' font-size='22' font-family='Arial' font-weight='700' fill='white'%3EMP%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="/assets/creator-console.css">
 </head>
 <body>
-<h1>MoneyPrinterTurbo</h1>
-<a href="https://github.com/harry0703/MoneyPrinterTurbo">https://github.com/harry0703/MoneyPrinterTurbo</a>
-<p>
-    只需提供一个视频 主题 或 关键词 ，就可以全自动生成视频文案、视频素材、视频字幕、视频背景音乐，然后合成一个高清的短视频。
-</p>
+    <div class="app-shell">
+        <header class="topbar">
+            <div class="brand">
+                <div class="brand-mark">MP</div>
+                <div>
+                    <h1>JC Video Factory</h1>
+                    <p>Faceless Reddit shorts</p>
+                </div>
+            </div>
+            <div class="topbar-actions">
+                <span class="connection-pill checking" id="connectionPill">Checking connection</span>
+                <a class="connection-pill checking" id="tiktokPill" href="#" target="_blank" rel="noopener">TikTok: checking</a>
+                <button class="ghost-button" id="copyPromptTop" type="button">Copy Idea Prompt</button>
+                <button class="primary-button" id="generateTop" type="button">Generate Video</button>
+            </div>
+        </header>
 
-<p>
-    Simply provide a topic or keyword for a video, and it will automatically generate the video copy, video materials,
-    video subtitles, and video background music before synthesizing a high-definition short video.
-</p>
+        <main class="console">
+            <nav class="sidebar" aria-label="Creator sections">
+                <button class="nav-item active" type="button" data-section="story" title="Story">ST</button>
+                <button class="nav-item" type="button" data-section="recipe" title="Recipe">RC</button>
+                <button class="nav-item" type="button" data-section="tasks" title="Tasks">TS</button>
+                <button class="nav-item" type="button" data-section="source" title="Source">SO</button>
+            </nav>
+
+            <section class="workspace" aria-label="Story editor">
+                <div class="section-header">
+                    <div>
+                        <h2>Story</h2>
+                        <p id="saveState">Draft saved locally</p>
+                    </div>
+                    <span class="duration-pill" id="durationStatus">Checking length</span>
+                </div>
+
+                <div class="tabs" role="tablist" aria-label="Story source">
+                    <button class="tab active" type="button" data-tab="write">Write</button>
+                    <button class="tab" type="button" data-tab="json">Paste ChatGPT JSON</button>
+                    <button class="tab" type="button" data-tab="prompt">Idea Prompt</button>
+                </div>
+
+                <div class="tab-panel active" data-panel="write">
+                    <label class="field-label" for="storyText">Narration script</label>
+                    <textarea id="storyText" class="story-input" spellcheck="true"></textarea>
+                </div>
+
+                <div class="tab-panel" data-panel="json">
+                    <label class="field-label" for="jsonInput">ChatGPT JSON</label>
+                    <textarea id="jsonInput" class="json-input" spellcheck="false"></textarea>
+                    <div class="button-row">
+                        <button class="primary-button" id="importJson" type="button">Import JSON</button>
+                        <button class="ghost-button" id="clearJson" type="button">Clear</button>
+                    </div>
+                </div>
+
+                <div class="tab-panel" data-panel="prompt">
+                    <label class="field-label" for="ideaPrompt">Reusable prompt</label>
+                    <textarea id="ideaPrompt" class="prompt-box" readonly></textarea>
+                    <div class="button-row">
+                        <button class="primary-button" id="copyPrompt" type="button">Copy Prompt</button>
+                    </div>
+                </div>
+
+                <div class="metrics-grid">
+                    <div class="metric">
+                        <strong id="wordCount">0</strong>
+                        <span>Words</span>
+                    </div>
+                    <div class="metric">
+                        <strong id="estimatedDuration">0s</strong>
+                        <span>Est. read</span>
+                    </div>
+                    <div class="metric">
+                        <strong id="highlightCount">0</strong>
+                        <span>Highlights</span>
+                    </div>
+                    <div class="metric">
+                        <strong id="validationLabel">Draft</strong>
+                        <span>Validation</span>
+                    </div>
+                </div>
+
+                <section class="panel recipe-panel" id="recipe">
+                    <div class="section-header compact">
+                        <div>
+                            <h2>Video Recipe</h2>
+                            <p>Personal defaults</p>
+                        </div>
+                    </div>
+                    <div class="settings-grid">
+                        <label class="settings-field">
+                            <span>Comment card title</span>
+                            <input id="cardTitle" type="text" maxlength="120">
+                        </label>
+                        <label class="settings-field">
+                            <span>Username</span>
+                            <input id="cardUsername" type="text">
+                        </label>
+                        <label class="settings-field">
+                            <span>Likes</span>
+                            <input id="cardLikes" type="text">
+                        </label>
+                        <label class="settings-field">
+                            <span>Highlights</span>
+                            <input id="highlightInput" type="text">
+                        </label>
+                    </div>
+                </section>
+
+                <section class="panel source-panel" id="source">
+                    <div class="section-header compact">
+                        <div>
+                            <h2>Source Notes</h2>
+                            <p>Optional metadata from ChatGPT</p>
+                        </div>
+                    </div>
+                    <div class="settings-grid">
+                        <label class="settings-field wide">
+                            <span>Source URL</span>
+                            <input id="sourceUrl" type="url">
+                        </label>
+                        <label class="settings-field">
+                            <span>Subreddit</span>
+                            <input id="subreddit" type="text">
+                        </label>
+                        <label class="settings-field">
+                            <span>Hashtags</span>
+                            <input id="hashtags" type="text">
+                        </label>
+                        <label class="settings-field wide">
+                            <span>Content notes</span>
+                            <input id="contentNotes" type="text">
+                        </label>
+                    </div>
+                </section>
+            </section>
+
+            <aside class="preview-column" aria-label="Preview and task status">
+                <div class="preview-header">
+                    <div>
+                        <h2>Preview</h2>
+                        <p>9:16 output</p>
+                    </div>
+                    <span class="format-tag">1080 x 1920</span>
+                </div>
+
+                <div class="phone-frame">
+                    <div class="phone-scene">
+                        <div class="mock-card">
+                            <span id="previewUsername">u/throwaway_aita</span>
+                            <strong id="previewTitle">AITA for refusing to switch seats?</strong>
+                            <small id="previewLikes">99+ likes</small>
+                        </div>
+                        <div class="mock-caption" id="previewCaption">
+                            Paste a story to preview the opening caption.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="review-list">
+                    <div class="review-row">
+                        <span>Minimum length</span>
+                        <strong id="minimumCheck">Needs script</strong>
+                    </div>
+                    <div class="review-row">
+                        <span>Comment card</span>
+                        <strong id="cardCheck">Needs title</strong>
+                    </div>
+                    <div class="review-row">
+                        <span>Bot / webserver</span>
+                        <strong id="backendCheck">Checking</strong>
+                    </div>
+                </div>
+
+                <div class="task-panel" id="tasks">
+                    <div class="section-header compact">
+                        <div>
+                            <h2>Current Task</h2>
+                            <p id="taskStatus">No task running</p>
+                        </div>
+                    </div>
+                    <div class="progress-track">
+                        <div class="progress-bar" id="progressBar"></div>
+                    </div>
+                    <video id="outputVideo" class="output-video" controls playsinline></video>
+                    <a id="downloadLink" class="download-link" href="#" download>Open generated video</a>
+                    <button class="primary-button full" id="publishTikTok" type="button" style="display:none">Publish to TikTok</button>
+                    <p class="status-message" id="publishStatus"></p>
+                </div>
+
+                <button class="primary-button full" id="generateMain" type="button">Generate Video</button>
+                <p class="status-message" id="statusMessage"></p>
+            </aside>
+        </main>
+    </div>
+
+    <script src="/assets/creator-console.js"></script>
 </body>
 </html>

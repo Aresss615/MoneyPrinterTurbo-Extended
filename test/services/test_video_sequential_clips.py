@@ -30,5 +30,43 @@ class TestSequentialSubclipsNeeded(unittest.TestCase):
         self.assertEqual(video.sequential_subclips_needed(43.0, 0), 1)
 
 
+class FixedRandom:
+    def __init__(self, value):
+        self.value = value
+        self.calls = []
+
+    def uniform(self, start, end):
+        self.calls.append((start, end))
+        return self.value
+
+
+class TestRandomSequentialStartTime(unittest.TestCase):
+    def test_uses_random_start_that_leaves_enough_room_for_needed_subclips(self):
+        rng = FixedRandom(123.45)
+
+        start = video.random_sequential_start_time(
+            source_duration=965.45,
+            target_duration=60.0,
+            max_clip_duration=5,
+            rng=rng,
+        )
+
+        self.assertEqual(start, 123.45)
+        self.assertEqual(rng.calls, [(0, 905.45)])
+
+    def test_returns_zero_when_source_is_too_short_to_randomize(self):
+        rng = FixedRandom(10.0)
+
+        start = video.random_sequential_start_time(
+            source_duration=40.0,
+            target_duration=60.0,
+            max_clip_duration=5,
+            rng=rng,
+        )
+
+        self.assertEqual(start, 0)
+        self.assertEqual(rng.calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()

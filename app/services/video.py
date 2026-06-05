@@ -123,6 +123,25 @@ def sequential_subclips_needed(audio_duration: float, max_clip_duration: int) ->
     return max(1, math.ceil(audio_duration / max_clip_duration))
 
 
+def random_sequential_start_time(
+    source_duration: float,
+    target_duration: float,
+    max_clip_duration: int,
+    rng=random,
+) -> float:
+    """Choose a random start while leaving enough source for sequential clips."""
+    if source_duration <= 0 or max_clip_duration <= 0:
+        return 0
+
+    needed_duration = (
+        sequential_subclips_needed(target_duration, max_clip_duration) * max_clip_duration
+    )
+    max_start = round(max(0, source_duration - needed_duration), 6)
+    if max_start <= 0:
+        return 0
+    return rng.uniform(0, max_start)
+
+
 def _load_font(font_path: str, size: int):
     """Load a truetype font, falling back to PIL's default if unavailable."""
     try:
@@ -652,6 +671,15 @@ def combine_videos(
             close_clip(clip)
             
             start_time = 0
+            if video_concat_mode.value == VideoConcatMode.sequential.value:
+                start_time = random_sequential_start_time(
+                    source_duration=clip_duration,
+                    target_duration=target_duration,
+                    max_clip_duration=max_clip_duration,
+                )
+                logger.debug(
+                    f"sequential clip start: {start_time:.2f}s from {os.path.basename(video_path)}"
+                )
 
             while start_time < clip_duration:
                 end_time = min(start_time + max_clip_duration, clip_duration)            
