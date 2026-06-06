@@ -3,7 +3,7 @@ import os
 from typing import Optional
 
 from fastapi import Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from loguru import logger
 from pydantic import BaseModel
 
@@ -15,6 +15,12 @@ from app.utils import utils
 
 
 router = new_router()
+
+TIKTOK_VERIFICATION_FILES = {
+    "tiktokWLly7x9cmPv0wlZyHy99pbIPzg458GTc.txt",
+    "tiktoklxPM3j6HLE0ELdYGQtKiUBRk3zcaNktU.txt",
+    "tiktokmrsQ4Koe9viUCunfDTI0E7veX4Ls1i8H.txt",
+}
 
 
 def _load_story_metadata(task_id: str) -> dict:
@@ -46,6 +52,22 @@ class PublishRequest(BaseModel):
 
 def _final_video_path(task_id: str) -> str:
     return os.path.join(utils.task_dir(task_id), "final-1.mp4")
+
+
+def _load_markdown_doc(filename: str) -> str:
+    path = os.path.join(utils.root_dir(), "docs", filename)
+    with open(path, "r", encoding="utf-8") as fp:
+        return fp.read()
+
+
+def _serve_verification_file(verification_filename: str):
+    if verification_filename not in TIKTOK_VERIFICATION_FILES:
+        return PlainTextResponse("not found", status_code=404)
+    path = os.path.join(utils.resource_dir("public/assets"), verification_filename)
+    if not os.path.isfile(path):
+        return PlainTextResponse("not found", status_code=404)
+    with open(path, "r", encoding="utf-8") as fp:
+        return PlainTextResponse(fp.read())
 
 
 @router.get("/tiktok/status", summary="Report TikTok connection status")
@@ -114,6 +136,31 @@ def tiktok_callback(request: Request, code: str = "", state: str = "", error: st
         f"<p>open_id: {open_id}</p>"
         "<p>You can close this tab and return to the creator console.</p>"
     )
+
+
+@router.get("/tiktok/callback/{verification_filename}")
+def tiktok_verification_file(request: Request, verification_filename: str):
+    return _serve_verification_file(verification_filename)
+
+
+@router.get("/tiktok/terms", summary="TikTok app Terms of Service page")
+def tiktok_terms(request: Request):
+    return PlainTextResponse(_load_markdown_doc("tiktok-terms.md"))
+
+
+@router.get("/tiktok/terms/{verification_filename}")
+def tiktok_terms_verification_file(request: Request, verification_filename: str):
+    return _serve_verification_file(verification_filename)
+
+
+@router.get("/tiktok/privacy", summary="TikTok app Privacy Policy page")
+def tiktok_privacy(request: Request):
+    return PlainTextResponse(_load_markdown_doc("tiktok-privacy.md"))
+
+
+@router.get("/tiktok/privacy/{verification_filename}")
+def tiktok_privacy_verification_file(request: Request, verification_filename: str):
+    return _serve_verification_file(verification_filename)
 
 
 @router.post("/tiktok/publish", summary="Publish a finished video to TikTok")

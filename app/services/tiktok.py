@@ -31,7 +31,7 @@ CREATOR_INFO_URL = "https://open.tiktokapis.com/v2/post/publish/creator_info/que
 PUBLISH_INIT_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/"
 PUBLISH_STATUS_URL = "https://open.tiktokapis.com/v2/post/publish/status/fetch/"
 
-SCOPES = "video.publish,video.upload"
+SCOPES = "video.publish"
 DEFAULT_PRIVACY = "SELF_ONLY"
 DEFAULT_COVER_TIMESTAMP_MS = 1000
 MIN_CHUNK_SIZE = 5 * 1024 * 1024

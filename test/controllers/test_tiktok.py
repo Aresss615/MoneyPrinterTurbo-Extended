@@ -126,6 +126,51 @@ class TestTikTokApi(unittest.TestCase):
         self.assertIn("TikTok connected", response.text)
         exchange.assert_called_once_with("abc")
 
+    def test_serves_tiktok_site_verification_file_under_callback_path(self):
+        response = self.client.get(
+            "/api/v1/tiktok/callback/"
+            "tiktokWLly7x9cmPv0wlZyHy99pbIPzg458GTc.txt"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.text.strip(),
+            "tiktok-developers-site-verification=WLly7x9cmPv0wlZyHy99pbIPzg458GTc",
+        )
+        self.assertIn("text/plain", response.headers["content-type"])
+
+    def test_serves_tiktok_privacy_page(self):
+        response = self.client.get("/api/v1/tiktok/privacy")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("JC Video Factory Privacy Policy", response.text)
+
+    def test_serves_tiktok_site_verification_file_under_privacy_path(self):
+        response = self.client.get(
+            "/api/v1/tiktok/privacy/"
+            "tiktoklxPM3j6HLE0ELdYGQtKiUBRk3zcaNktU.txt"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.text.strip(),
+            "tiktok-developers-site-verification=lxPM3j6HLE0ELdYGQtKiUBRk3zcaNktU",
+        )
+        self.assertIn("text/plain", response.headers["content-type"])
+
+    def test_serves_tiktok_site_verification_file_under_terms_path(self):
+        response = self.client.get(
+            "/api/v1/tiktok/terms/"
+            "tiktokmrsQ4Koe9viUCunfDTI0E7veX4Ls1i8H.txt"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.text.strip(),
+            "tiktok-developers-site-verification=mrsQ4Koe9viUCunfDTI0E7veX4Ls1i8H",
+        )
+        self.assertIn("text/plain", response.headers["content-type"])
+
     def test_publish_passes_tiktok_publish_controls(self):
         task_id = "tiktok-publish-controls"
         task_path = Path(utils.task_dir(task_id))

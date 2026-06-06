@@ -48,7 +48,7 @@ class TestTikTokService(unittest.TestCase):
             url = tiktok.build_authorize_url("xyz-state")
 
         self.assertIn("client_key=abc", url)
-        self.assertIn("scope=video.publish%2Cvideo.upload", url)
+        self.assertIn("scope=video.publish", url)
         self.assertIn("state=xyz-state", url)
         self.assertIn("response_type=code", url)
         self.assertIn("redirect_uri=https%3A%2F%2Fdev.example.com%2Fcb", url)

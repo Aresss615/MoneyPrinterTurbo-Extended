@@ -222,12 +222,12 @@ hide_log = false
 [tiktok]
 # TikTok Content Posting API (Direct Post) credentials.
 # Register an app at https://developers.tiktok.com, add the "Content Posting API"
-# product, and request the video.publish + video.upload scopes. See SETUP_NOTES.md.
+# product, and request the video.publish scope (Direct Post). See SETUP_NOTES.md.
 client_key = ""
 client_secret = ""
 # Must exactly match an HTTPS redirect URI registered on your TikTok app.
 # For local testing, point a Cloudflare Tunnel/ngrok URL at http://127.0.0.1:8080.
-redirect_uri = "https://your-cloudflare-tunnel.example.com/api/v1/tiktok/callback"
+redirect_uri = "https://app.example.com/api/v1/tiktok/callback"
 # Unaudited apps can only post privately (SELF_ONLY). After TikTok audits your
 # app you may change this to PUBLIC_TO_EVERYONE (no code change needed).
 privacy_level = "SELF_ONLY"
