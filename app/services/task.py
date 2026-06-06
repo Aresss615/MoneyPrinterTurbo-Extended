@@ -1,6 +1,7 @@
 import math
 import os.path
 import re
+import shutil
 from os import path
 
 from loguru import logger
@@ -8,9 +9,25 @@ from loguru import logger
 from app.config import config
 from app.models import const
 from app.models.schema import VideoConcatMode, VideoParams
-from app.services import llm, material, subtitle, video, voice
+from app.services import llm, material, subtitle, task_control, video, voice
 from app.services import state as sm
 from app.utils import utils
+
+
+def _abort_if_canceled(task_id) -> bool:
+    """Cooperative cancellation checkpoint.
+
+    Returns True (and tears the task down) when a cancel has been requested for
+    ``task_id``: marks the task canceled, deletes its partial working dir, and
+    clears the cancel flag. Callers must stop the pipeline when this is True.
+    """
+    if not task_control.is_canceled(task_id):
+        return False
+    logger.warning(f"task {task_id} canceled; cleaning up working dir")
+    sm.state.update_task(task_id, state=const.TASK_STATE_CANCELED)
+    shutil.rmtree(utils.task_dir(task_id), ignore_errors=True)
+    task_control.clear(task_id)
+    return True
 
 
 def generate_script(task_id, params):
@@ -223,6 +240,8 @@ def generate_final_videos(
 
     _progress = 50
     for i in range(params.video_count):
+        if _abort_if_canceled(task_id):
+            return [], []
         index = i + 1
         combined_video_path = path.join(
             utils.task_dir(task_id), f"combined-{index}.mp4"
@@ -267,6 +286,8 @@ def generate_final_videos(
 
 def start(task_id, params: VideoParams, stop_at: str = "video"):
     logger.info(f"start task: {task_id}, stop_at: {stop_at}")
+    if _abort_if_canceled(task_id):
+        return
     sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=5)
 
     if type(params.video_concat_mode) is str:
@@ -276,6 +297,9 @@ def start(task_id, params: VideoParams, stop_at: str = "video"):
     video_script = generate_script(task_id, params)
     if not video_script or "Error: " in video_script:
         sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
+        task_control.clear(task_id)
+        return
+    if _abort_if_canceled(task_id):
         return
 
     sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=10)
@@ -310,6 +334,9 @@ def start(task_id, params: VideoParams, stop_at: str = "video"):
     )
     if not audio_file:
         sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
+        task_control.clear(task_id)
+        return
+    if _abort_if_canceled(task_id):
         return
 
     sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=30)
@@ -327,6 +354,8 @@ def start(task_id, params: VideoParams, stop_at: str = "video"):
     subtitle_path = generate_subtitle(
         task_id, params, video_script, sub_maker, audio_file
     )
+    if _abort_if_canceled(task_id):
+        return
 
     if stop_at == "subtitle":
         sm.state.update_task(
@@ -345,6 +374,9 @@ def start(task_id, params: VideoParams, stop_at: str = "video"):
     )
     if not downloaded_videos:
         sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
+        task_control.clear(task_id)
+        return
+    if _abort_if_canceled(task_id):
         return
 
     if stop_at == "materials":
@@ -363,8 +395,13 @@ def start(task_id, params: VideoParams, stop_at: str = "video"):
         task_id, params, downloaded_videos, audio_file, subtitle_path, video_script
     )
 
+    # generate_final_videos returns empty lists when it aborts on cancel; in that
+    # case the task is already marked canceled, so don't overwrite it as failed.
+    if _abort_if_canceled(task_id):
+        return
     if not final_video_paths:
         sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
+        task_control.clear(task_id)
         return
 
     logger.success(
@@ -384,6 +421,7 @@ def start(task_id, params: VideoParams, stop_at: str = "video"):
     sm.state.update_task(
         task_id, state=const.TASK_STATE_COMPLETE, progress=100, **kwargs
     )
+    task_control.clear(task_id)
     return kwargs
 
 

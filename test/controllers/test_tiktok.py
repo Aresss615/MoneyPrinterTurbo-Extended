@@ -13,7 +13,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from app.asgi import app
-from app.services import tiktok
+from app.services import creator_console, tiktok
 from app.utils import utils
 
 
@@ -85,8 +85,9 @@ class TestTikTokApi(unittest.TestCase):
                 response = self.client.post(
                     "/api/v1/tiktok/publish", json={"task_id": task_id}
                 )
+                marker = creator_console.load_publish_marker(task_id)
         finally:
-            for name in ("final-1.mp4", "story.json"):
+            for name in ("final-1.mp4", "story.json", "publish.json"):
                 try:
                     os.remove(task_path / name)
                 except OSError:
@@ -99,6 +100,9 @@ class TestTikTokApi(unittest.TestCase):
         self.assertEqual(
             publish.call_args.kwargs["hashtags"], ["#aita", "#redditstories"]
         )
+        self.assertEqual(marker["method"], "direct")
+        self.assertEqual(marker["status"], "PUBLISH_COMPLETE")
+        self.assertEqual(marker["publish_id"], "p1")
 
     def test_status_surfaces_user_info_display_name(self):
         with patch.object(tiktok, "is_configured", return_value=True), patch.object(
@@ -136,9 +140,14 @@ class TestTikTokApi(unittest.TestCase):
                 response = self.client.post(
                     "/api/v1/tiktok/upload-inbox", json={"task_id": task_id}
                 )
+                marker = creator_console.load_publish_marker(task_id)
         finally:
             try:
                 os.remove(task_path / "final-1.mp4")
+            except OSError:
+                pass
+            try:
+                os.remove(task_path / "publish.json")
             except OSError:
                 pass
 
@@ -146,6 +155,9 @@ class TestTikTokApi(unittest.TestCase):
         self.assertEqual(response.json()["data"]["status"], "PUBLISH_COMPLETE")
         upload.assert_called_once()
         self.assertTrue(upload.call_args.args[0].endswith("final-1.mp4"))
+        self.assertEqual(marker["method"], "inbox")
+        self.assertEqual(marker["status"], "PUBLISH_COMPLETE")
+        self.assertEqual(marker["publish_id"], "inbox-1")
 
     def test_callback_rejects_invalid_oauth_state(self):
         with patch.object(

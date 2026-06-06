@@ -28,12 +28,14 @@
         <main class="console">
             <nav class="sidebar" aria-label="Creator sections">
                 <button class="nav-item active" type="button" data-section="story" title="Story">ST</button>
+                <button class="nav-item" type="button" data-section="queue" title="Queue">QU</button>
                 <button class="nav-item" type="button" data-section="recipe" title="Recipe">RC</button>
                 <button class="nav-item" type="button" data-section="tasks" title="Tasks">TS</button>
+                <button class="nav-item" type="button" data-section="library" title="Library">LB</button>
                 <button class="nav-item" type="button" data-section="source" title="Source">SO</button>
             </nav>
 
-            <section class="workspace" aria-label="Story editor">
+            <section class="workspace" id="story" aria-label="Story editor">
                 <div class="section-header">
                     <div>
                         <h2>Story</h2>
@@ -110,10 +112,40 @@
                             <input id="cardLikes" type="text">
                         </label>
                         <label class="settings-field">
+                            <span>Narrator voice</span>
+                            <select id="narratorGender">
+                                <option value="">Auto (match story)</option>
+                                <option value="male">Male</option>
+                                <option value="female">Female</option>
+                            </select>
+                        </label>
+                        <label class="settings-field">
                             <span>Highlights</span>
                             <input id="highlightInput" type="text">
                         </label>
                     </div>
+                </section>
+
+                <section class="panel queue-panel" id="queue">
+                    <div class="section-header compact queue-header">
+                        <div>
+                            <h2>Story Queue</h2>
+                            <p id="queueSummary">No queued stories</p>
+                        </div>
+                        <div class="queue-controls">
+                            <button class="primary-button" id="startQueue" type="button">Start</button>
+                            <button class="ghost-button" id="pauseQueue" type="button">Pause</button>
+                            <button class="ghost-button" id="refreshQueue" type="button">Refresh</button>
+                        </div>
+                    </div>
+                    <label class="field-label" for="queueJsonInput">Queue JSON</label>
+                    <textarea id="queueJsonInput" class="json-input queue-json-input" spellcheck="false"></textarea>
+                    <div class="button-row">
+                        <button class="primary-button" id="importQueue" type="button">Import to Queue</button>
+                        <button class="ghost-button" id="clearQueueJson" type="button">Clear</button>
+                    </div>
+                    <div id="queueList" class="queue-list"></div>
+                    <p class="status-message" id="queueStatus"></p>
                 </section>
 
                 <section class="panel source-panel" id="source">
@@ -141,6 +173,24 @@
                             <input id="contentNotes" type="text">
                         </label>
                     </div>
+                </section>
+
+                <section class="panel library-panel" id="library">
+                    <div class="section-header compact library-header">
+                        <div>
+                            <h2>Video Library</h2>
+                            <p id="libraryUsage">Calculating disk usage</p>
+                        </div>
+                        <div class="library-controls">
+                            <label class="settings-field cleanup-field">
+                                <span>Older than</span>
+                                <input id="cleanupDays" type="number" value="7" min="1">
+                            </label>
+                            <button class="ghost-button" id="cleanupBtn" type="button">Delete unposted</button>
+                            <button class="primary-button" id="refreshLibrary" type="button">Refresh</button>
+                        </div>
+                    </div>
+                    <div id="libraryGrid" class="library-grid"></div>
                 </section>
             </section>
 
@@ -187,12 +237,30 @@
                             <h2>Current Task</h2>
                             <p id="taskStatus">No task running</p>
                         </div>
+                        <button class="ghost-button danger" id="cancelTask" type="button" style="display:none">Cancel</button>
                     </div>
                     <div class="progress-track">
                         <div class="progress-bar" id="progressBar"></div>
                     </div>
                     <video id="outputVideo" class="output-video" controls playsinline></video>
                     <a id="downloadLink" class="download-link" href="#" download>Open generated video</a>
+                    <div class="manual-upload-panel" id="manualUploadPanel" hidden>
+                        <div class="manual-upload-header">
+                            <div>
+                                <h3>Manual TikTok upload</h3>
+                                <p id="manualFileName">MP4 file</p>
+                            </div>
+                        </div>
+                        <div class="manual-upload-actions">
+                            <a class="primary-button" id="manualOpenFile" href="#" target="_blank" rel="noopener">Open MP4</a>
+                            <a class="ghost-button" id="manualDownloadFile" href="#" download>Download MP4</a>
+                            <button class="ghost-button" id="copyManualCaption" type="button">Copy caption</button>
+                        </div>
+                        <label class="settings-field wide">
+                            <span>Caption</span>
+                            <textarea id="manualCaption" rows="4"></textarea>
+                        </label>
+                    </div>
                     <div class="publish-settings" id="publishSettings">
                         <label class="settings-field wide">
                             <span>TikTok privacy</span>

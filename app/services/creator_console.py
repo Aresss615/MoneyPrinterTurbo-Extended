@@ -1,13 +1,17 @@
 import json
 import math
+import os
 import random
 import re
+import time
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
 from pydantic import BaseModel, Field
 
 from app.models.schema import MaterialInfo, VideoParams
+from app.utils import utils
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -62,10 +66,94 @@ def pick_background_material(rng=random) -> MaterialInfo:
     return MaterialInfo(provider="local", url=str(rng.choice(sources)), duration=0)
 
 
-def pick_voice(rng=random) -> str:
-    """Pick one Edge-TTS voice at random from :data:`VOICE_POOL`."""
+def pick_voice(rng=random, gender: str = "") -> str:
+    """Pick an Edge-TTS voice, filtered by narrator gender when known."""
+    gender = (gender or "").strip().lower()
     pool = VOICE_POOL or [DEFAULT_VOICE_NAME]
+    if gender in ("male", "female"):
+        suffix = f"-{gender.capitalize()}"
+        filtered = [voice for voice in pool if voice.endswith(suffix)]
+        if filtered:
+            pool = filtered
+        else:
+            logger.warning(
+                f"no '{gender}' voices in VOICE_POOL; falling back to a random voice"
+            )
+    else:
+        logger.warning("narrator gender unknown; picking a random voice")
     return rng.choice(pool)
+
+
+# Reddit demographic self-tags like "28F", "(30m)", "F23", "M 41". The age digit
+# adjacent to the M/F is what keeps this from matching stray letters in prose.
+_SELF_TAG_RE = re.compile(
+    r"\b(?:(?:\d{1,2}\s*([mf]))|(?:([mf])\s*\d{1,2}))\b", re.IGNORECASE
+)
+# Strong first-person self-identification (weighted high).
+_DIRECT_FEMALE_RE = [
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\bas a woman\b",
+        r"\bi'?m a (?:girl|woman)\b",
+        r"\bi am a (?:girl|woman)\b",
+        r"\bbeing a (?:mom|mother)\b",
+    )
+]
+_DIRECT_MALE_RE = [
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\bas a man\b",
+        r"\bi'?m a (?:guy|man)\b",
+        r"\bi am a (?:guy|man)\b",
+        r"\bbeing a (?:dad|father)\b",
+    )
+]
+# Partner cues assume a heterosexual relationship — lowest-weight fallback only.
+_PARTNER_FEMALE_RE = [
+    re.compile(p, re.IGNORECASE)
+    for p in (r"\bmy husband\b", r"\bmy fianc[eé]e?\b", r"\bmy boyfriend\b")
+]
+_PARTNER_MALE_RE = [
+    re.compile(p, re.IGNORECASE) for p in (r"\bmy wife\b", r"\bmy girlfriend\b")
+]
+
+
+def _self_tag_gender(text: str) -> str:
+    match = _SELF_TAG_RE.search(text)
+    if not match:
+        return ""
+    sex = (match.group(1) or match.group(2) or "").lower()
+    return "female" if sex == "f" else "male" if sex == "m" else ""
+
+
+def resolve_narrator_gender(story: "CreatorStory") -> str:
+    """Best-effort narrator gender for voice selection.
+
+    Resolution order: the explicit ``narrator_gender`` field, then Reddit
+    self-tags (e.g. ``28F``), then weighted keyword voting over the script.
+    Returns ``"male"``/``"female"`` or ``""`` when there is no usable signal.
+    """
+    explicit = normalize_narrator_gender(getattr(story, "narrator_gender", ""))
+    if explicit in ("male", "female"):
+        return explicit
+
+    title = getattr(story, "comment_card_title", "") or ""
+    script = getattr(story, "narration_script", "") or ""
+    text = f"{title}\n{script}"
+
+    tag = _self_tag_gender(text)
+    if tag:
+        return tag
+
+    female = sum(3 * len(p.findall(text)) for p in _DIRECT_FEMALE_RE)
+    male = sum(3 * len(p.findall(text)) for p in _DIRECT_MALE_RE)
+    female += sum(len(p.findall(text)) for p in _PARTNER_FEMALE_RE)
+    male += sum(len(p.findall(text)) for p in _PARTNER_MALE_RE)
+    if female > male:
+        return "female"
+    if male > female:
+        return "male"
+    return ""
 
 
 CHATGPT_IDEA_PROMPT = """Browse Reddit for a strong short-form story suitable for a faceless TikTok/Reels video.
@@ -88,6 +176,14 @@ Rules:
 - Make it sound natural when spoken by TTS.
 - End with a question that invites comments.
 
+Output format (READ CAREFULLY — invalid JSON cannot be imported):
+- Return ONE single, complete JSON object and NOTHING else: no prose before or after, no code fences, no comments.
+- It MUST start with `{` and end with `}`. Do not stop early or truncate — emit every field below, then the closing `}`.
+- Use straight double quotes `"` for all keys and strings. Never use smart/curly quotes.
+- Inside any string value, escape every double quote as `\\"` and write the text as one line — replace real line breaks with `\\n`. This matters most for `narration_script`, which often contains dialogue.
+- Do not put a comma after the last field in the object or the last item in an array (no trailing commas).
+- If the story has quoted dialogue, prefer single quotes inside the narration (e.g. 'stop') so the JSON stays simple.
+
 Return ONLY this JSON:
 
 {
@@ -103,7 +199,8 @@ Return ONLY this JSON:
   "suggested_hook": "",
   "suggested_description": "",
   "suggested_hashtags": [],
-  "content_notes": ""
+  "content_notes": "",
+  "narrator_gender": ""
 }
 
 Field rules:
@@ -113,7 +210,8 @@ Field rules:
 - suggested_hook: one short sentence for the first 2 seconds.
 - suggested_description: TikTok/Reels caption, max 150 characters.
 - suggested_hashtags: 5-8 hashtags.
-- content_notes: mention if anything was softened, anonymized, or potentially sensitive."""
+- content_notes: mention if anything was softened, anonymized, or potentially sensitive.
+- narrator_gender: "male" or "female" — the gender of the first-person narrator telling the story, inferred from the content. Use "" only if genuinely ambiguous."""
 
 
 class CreatorStory(BaseModel):
@@ -130,6 +228,7 @@ class CreatorStory(BaseModel):
     suggested_description: str = ""
     suggested_hashtags: list[str] = Field(default_factory=list)
     content_notes: str = ""
+    narrator_gender: str = ""
 
 
 def estimate_read_seconds(script: str, words_per_minute: int = SHORT_FORM_WORDS_PER_MINUTE) -> int:
@@ -154,10 +253,33 @@ def derive_card_title(story: str, max_chars: int = 120) -> str:
 
 
 def parse_chatgpt_story_json(raw_json: str) -> CreatorStory:
-    payload = json.loads(normalize_json_like_text(raw_json))
+    payload = loads_creator_json(normalize_json_like_text(raw_json))
     if not isinstance(payload, dict):
         raise ValueError("ChatGPT story JSON must be an object.")
     return story_from_mapping(payload)
+
+
+def loads_creator_json(text: str) -> Any:
+    """Parse pasted ChatGPT JSON, repairing the breakages LLMs commonly emit.
+
+    Strict :func:`json.loads` is tried first so well-formed input is untouched.
+    On failure we run :func:`repair_json_like_text` (escapes inner quotes and
+    raw newlines, drops trailing commas) and retry. If it still cannot parse,
+    we raise a human-readable :class:`ValueError` instead of leaking a cryptic
+    ``Expecting ',' delimiter`` message to the webapp.
+    """
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as first_error:
+        try:
+            return json.loads(repair_json_like_text(text))
+        except json.JSONDecodeError:
+            raise ValueError(
+                "Could not parse the pasted JSON. Make sure you copied the "
+                "entire object — it must start with '{' and end with '}' — and "
+                "that quotes inside the story are escaped. "
+                f"(JSON error: {first_error})"
+            ) from first_error
 
 
 def story_from_mapping(payload: dict[str, Any]) -> CreatorStory:
@@ -186,6 +308,7 @@ def story_from_mapping(payload: dict[str, Any]) -> CreatorStory:
         ),
         suggested_hashtags=normalize_hashtags(payload.get("suggested_hashtags") or []),
         content_notes=clean_text(payload.get("content_notes") or ""),
+        narrator_gender=normalize_narrator_gender(payload.get("narrator_gender") or ""),
     )
 
 
@@ -195,6 +318,13 @@ def build_video_params(story: CreatorStory, rng=random) -> VideoParams:
         raise ValueError("narration_script must not be empty")
 
     title = story.comment_card_title or derive_card_title(script)
+    gender = resolve_narrator_gender(story)
+    # Persist the resolved gender so the dumped story.json is debuggable next time.
+    story.narrator_gender = gender
+    voice_name = pick_voice(rng, gender=gender)
+    logger.info(
+        f"narrator gender resolved to '{gender or 'unknown'}' → voice {voice_name}"
+    )
     return VideoParams(
         video_subject=story.video_subject or title or "AITA story",
         video_script=script,
@@ -207,7 +337,7 @@ def build_video_params(story: CreatorStory, rng=random) -> VideoParams:
         video_source="local",
         video_materials=[pick_background_material(rng)],
         video_language="en",
-        voice_name=pick_voice(rng),
+        voice_name=voice_name,
         voice_volume=1.0,
         voice_rate=1.0,
         bgm_type="",
@@ -248,6 +378,112 @@ def strip_json_fence(raw_json: str) -> str:
         text = re.sub(r"^(?:`{3,}|~{3,})(?:json)?\s*", "", text, flags=re.IGNORECASE)
         text = re.sub(r"\s*(?:`{3,}|~{3,})$", "", text)
     return text.strip()
+
+
+def repair_json_like_text(text: str) -> str:
+    """Best-effort repair of almost-valid JSON pasted from an LLM.
+
+    Targets the breakages we actually see when a model fills a long
+    ``narration_script`` by hand: unescaped double quotes inside string values
+    (dialogue), raw newlines/tabs inside strings, and trailing commas. It walks
+    the text once, tracking whether each string is an object key or a value, and
+    re-escapes characters that would otherwise abort parsing. Only invoked as a
+    fallback after strict parsing fails, so valid JSON is never altered.
+
+    A quote that closes a string is distinguished from an inner quote by what
+    follows it: a value's closing quote is followed by ``,``/``}``/``]`` (and a
+    ``,`` must in turn be followed by another string, ``}`` or ``]``), while a
+    key's closing quote is followed by ``:``. Anything else is treated as an
+    unescaped inner quote and escaped in place.
+    """
+    out: list[str] = []
+    stack: list[str] = []  # '{' or '[' for each open container
+    expect_key = False  # only meaningful while the current container is '{'
+    whitespace = " \t\r\n"
+    n = len(text)
+    i = 0
+
+    def skip_ws(idx: int) -> int:
+        while idx < n and text[idx] in whitespace:
+            idx += 1
+        return idx
+
+    while i < n:
+        ch = text[i]
+        if ch == '"':
+            is_key = bool(stack) and stack[-1] == "{" and expect_key
+            out.append('"')
+            i += 1
+            while i < n:
+                c = text[i]
+                if c == "\\":  # keep existing escape sequences verbatim
+                    out.append(c)
+                    if i + 1 < n:
+                        out.append(text[i + 1])
+                        i += 2
+                    else:
+                        i += 1
+                    continue
+                if c == '"':
+                    j = skip_ws(i + 1)
+                    nxt = text[j] if j < n else ""
+                    if is_key:
+                        closing = nxt == ":"
+                    elif nxt in ("", "}", "]"):
+                        closing = True
+                    elif nxt == ",":
+                        k = skip_ws(j + 1)
+                        after = text[k] if k < n else ""
+                        closing = after in ("", '"', "}", "]")
+                    else:
+                        closing = False
+                    if closing:
+                        out.append('"')
+                        i += 1
+                        break
+                    out.append('\\"')
+                    i += 1
+                    continue
+                if c == "\n":
+                    out.append("\\n")
+                elif c == "\r":
+                    out.append("\\r")
+                elif c == "\t":
+                    out.append("\\t")
+                else:
+                    out.append(c)
+                i += 1
+            if stack and stack[-1] == "{":
+                expect_key = False
+            continue
+        if ch == "{":
+            stack.append("{")
+            expect_key = True
+            out.append(ch)
+        elif ch == "[":
+            stack.append("[")
+            out.append(ch)
+        elif ch in "}]":
+            if stack:
+                stack.pop()
+            out.append(ch)
+        elif ch == ":":
+            expect_key = False
+            out.append(ch)
+        elif ch == ",":
+            j = skip_ws(i + 1)
+            nxt = text[j] if j < n else ""
+            if nxt in ("}", "]"):  # trailing comma -> drop it
+                i += 1
+                continue
+            out.append(ch)
+            if stack and stack[-1] == "{":
+                expect_key = True
+        else:
+            out.append(ch)
+        i += 1
+
+    return "".join(out)
 
 
 def normalize_smart_quotes(text: str) -> str:
@@ -304,3 +540,77 @@ def normalize_hashtags(value: Any) -> list[str]:
         if tag:
             hashtags.append(f"#{tag}")
     return hashtags
+
+
+def normalize_narrator_gender(value: Any) -> str:
+    gender = clean_text(value).lower()
+    return gender if gender in ("male", "female") else ""
+
+
+def publish_marker_path(task_id: str) -> str:
+    return os.path.join(utils.task_dir(task_id), "publish.json")
+
+
+def record_publish(task_id: str, method: str, result: dict) -> None:
+    """Persist that a video was sent to TikTok."""
+    marker = {
+        "method": method,
+        "status": result.get("status", ""),
+        "publish_id": result.get("publish_id", ""),
+        "posted_at": time.time(),
+    }
+    with open(publish_marker_path(task_id), "w", encoding="utf-8") as fp:
+        json.dump(marker, fp, indent=2)
+
+
+def load_publish_marker(task_id: str) -> dict:
+    path = publish_marker_path(task_id)
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as fp:
+            return json.load(fp)
+    except (ValueError, OSError):
+        return {}
+
+
+def slugify(text: str, max_len: int = 60) -> str:
+    text = (text or "").strip().lower()
+    text = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
+    return (text[:max_len].rstrip("-")) or "video"
+
+
+def list_library_videos() -> list[dict]:
+    """Scan storage/tasks for finished videos, newest first."""
+    tasks_root = utils.task_dir()
+    items = []
+    for task_id in os.listdir(tasks_root):
+        task_path = os.path.join(tasks_root, task_id)
+        video_path = os.path.join(task_path, "final-1.mp4")
+        if not os.path.isfile(video_path):
+            continue
+        story = {}
+        story_path = os.path.join(task_path, "story.json")
+        if os.path.isfile(story_path):
+            try:
+                with open(story_path, "r", encoding="utf-8") as fp:
+                    story = json.load(fp)
+            except (ValueError, OSError):
+                story = {}
+        title = story.get("comment_card_title") or story.get("video_subject") or task_id
+        marker = load_publish_marker(task_id)
+        items.append(
+            {
+                "task_id": task_id,
+                "display_name": title,
+                "slug": slugify(title),
+                "video_url": f"/tasks/{task_id}/final-1.mp4",
+                "created_at": os.path.getmtime(video_path),
+                "size_bytes": os.path.getsize(video_path),
+                "posted": marker,
+                "suggested_description": story.get("suggested_description", ""),
+                "suggested_hashtags": story.get("suggested_hashtags", []),
+            }
+        )
+    items.sort(key=lambda item: item["created_at"], reverse=True)
+    return items

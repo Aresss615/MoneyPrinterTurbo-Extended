@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from app.controllers import base
 from app.controllers.v1.base import new_router
 from app.models.exception import HttpException
-from app.services import tiktok
+from app.services import creator_console, tiktok
 from app.utils import utils
 
 
@@ -214,6 +214,7 @@ def tiktok_publish(request: Request, body: PublishRequest):
             is_aigc=body.is_aigc,
             poll=body.poll,
         )
+        creator_console.record_publish(body.task_id, "direct", result)
     except tiktok.TikTokError as exc:
         raise HttpException(
             task_id=body.task_id, status_code=400, message=str(exc)
@@ -237,6 +238,7 @@ def tiktok_upload_inbox(request: Request, body: InboxUploadRequest):
         )
     try:
         result = tiktok.upload_video_to_inbox(video_path, poll=body.poll)
+        creator_console.record_publish(body.task_id, "inbox", result)
     except tiktok.TikTokError as exc:
         raise HttpException(
             task_id=body.task_id, status_code=400, message=str(exc)
