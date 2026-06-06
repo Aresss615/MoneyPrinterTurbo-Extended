@@ -598,7 +598,7 @@ async function publishToTikTok() {
         setPublishStatus(error.message || "Publish failed.", "error");
     } finally {
         els.publishTikTok.disabled = false;
-        els.publishTikTok.textContent = "Publish to TikTok";
+        els.publishTikTok.textContent = "Publish to TikTok (Direct Post)";
     }
 }
 
