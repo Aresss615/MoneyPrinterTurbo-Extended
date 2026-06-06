@@ -34,6 +34,11 @@ def _load_story_metadata(task_id: str) -> dict:
         return {}
 
 
+class InboxUploadRequest(BaseModel):
+    task_id: str
+    poll: bool = True
+
+
 class PublishRequest(BaseModel):
     task_id: str
     title: Optional[str] = None
@@ -77,11 +82,18 @@ def tiktok_status(request: Request):
     connected = bool(cache.get("access_token"))
     nickname = ""
     creator_info = {}
+    user_info = {}
     if connected:
+        try:  # user.info.basic — identifies the connected account on the pill
+            user_info = tiktok.query_user_info()
+            nickname = user_info.get("display_name", "")
+        except Exception as exc:  # network/token issues shouldn't 500 the pill
+            logger.warning(f"tiktok user_info failed: {exc}")
         try:
             creator_info = tiktok.query_creator_info()
-            nickname = creator_info.get("creator_nickname", "")
-        except Exception as exc:  # network/token issues shouldn't 500 the pill
+            if not nickname:
+                nickname = creator_info.get("creator_nickname", "")
+        except Exception as exc:
             logger.warning(f"tiktok creator_info failed: {exc}")
     return utils.get_response(
         200,
@@ -93,6 +105,7 @@ def tiktok_status(request: Request):
                 "privacy_level", tiktok.DEFAULT_PRIVACY
             ),
             "creator_info": creator_info,
+            "user_info": user_info,
         },
     )
 
@@ -201,6 +214,29 @@ def tiktok_publish(request: Request, body: PublishRequest):
             is_aigc=body.is_aigc,
             poll=body.poll,
         )
+    except tiktok.TikTokError as exc:
+        raise HttpException(
+            task_id=body.task_id, status_code=400, message=str(exc)
+        )
+    return utils.get_response(200, result)
+
+
+@router.post("/tiktok/upload-inbox", summary="Upload a finished video to the TikTok inbox")
+def tiktok_upload_inbox(request: Request, body: InboxUploadRequest):
+    """Send the finished video to the creator's TikTok inbox as a draft.
+
+    Uses the video.upload scope; the creator finishes the caption/privacy and
+    posts from within the TikTok app.
+    """
+    video_path = _final_video_path(body.task_id)
+    if not os.path.isfile(video_path):
+        raise HttpException(
+            task_id=body.task_id,
+            status_code=404,
+            message=f"finished video not found for task {body.task_id}",
+        )
+    try:
+        result = tiktok.upload_video_to_inbox(video_path, poll=body.poll)
     except tiktok.TikTokError as exc:
         raise HttpException(
             task_id=body.task_id, status_code=400, message=str(exc)

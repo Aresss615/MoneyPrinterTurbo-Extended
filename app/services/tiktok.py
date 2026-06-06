@@ -27,11 +27,16 @@ from app.utils import utils
 
 AUTHORIZE_URL = "https://www.tiktok.com/v2/auth/authorize/"
 OAUTH_TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/"
+USER_INFO_URL = "https://open.tiktokapis.com/v2/user/info/"
 CREATOR_INFO_URL = "https://open.tiktokapis.com/v2/post/publish/creator_info/query/"
 PUBLISH_INIT_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/"
+INBOX_INIT_URL = "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/"
 PUBLISH_STATUS_URL = "https://open.tiktokapis.com/v2/post/publish/status/fetch/"
 
-SCOPES = "video.publish"
+# user.info.basic identifies the connected account; video.publish is Direct Post;
+# video.upload sends a draft to the creator's TikTok inbox to finish in-app.
+SCOPES = "user.info.basic,video.publish,video.upload"
+USER_INFO_FIELDS = "open_id,union_id,avatar_url,display_name"
 DEFAULT_PRIVACY = "SELF_ONLY"
 DEFAULT_COVER_TIMESTAMP_MS = 1000
 MIN_CHUNK_SIZE = 5 * 1024 * 1024
@@ -279,6 +284,18 @@ def query_creator_info(token: Optional[str] = None) -> dict:
     return _check_envelope(resp)
 
 
+def query_user_info(token: Optional[str] = None) -> dict:
+    """Fetch the connected creator's basic profile (user.info.basic scope)."""
+    token = token or get_valid_access_token()
+    resp = requests.get(
+        USER_INFO_URL,
+        headers={"Authorization": f"Bearer {token}"},
+        params={"fields": USER_INFO_FIELDS},
+        timeout=30,
+    )
+    return _check_envelope(resp).get("user") or {}
+
+
 def build_upload_plan(video_size: int) -> dict:
     if video_size <= 0:
         raise TikTokError("video is empty")
@@ -399,6 +416,18 @@ def publish_video(
     if not publish_id or not upload_url:
         raise TikTokError(f"init response missing publish_id/upload_url: {data}")
 
+    _put_video_chunks(video_path, video_size, upload_plan, upload_url, publish_id)
+
+    if not poll:
+        return {"status": "PROCESSING_UPLOAD", "publish_id": publish_id}
+
+    return _poll_status(publish_id, token, poll_interval, poll_timeout)
+
+
+def _put_video_chunks(
+    video_path: str, video_size: int, upload_plan: dict, upload_url: str, publish_id: str
+) -> None:
+    """Stream the local video to ``upload_url`` as sequential byte-range chunks."""
     logger.info(
         f"tiktok: uploading {video_size} bytes in "
         f"{upload_plan['total_chunk_count']} chunk(s) for publish_id={publish_id}"
@@ -421,6 +450,41 @@ def publish_video(
             timeout=600,
         )
         put_resp.raise_for_status()
+
+
+def upload_video_to_inbox(
+    video_path: str,
+    *,
+    access_token: Optional[str] = None,
+    poll: bool = True,
+    poll_interval: float = 3.0,
+    poll_timeout: float = 300.0,
+) -> dict:
+    """Upload a local mp4 to the creator's TikTok inbox as a draft (video.upload).
+
+    Unlike Direct Post, no ``post_info`` is sent — the creator finishes the
+    caption, privacy, and interaction settings inside the TikTok app. Returns
+    the terminal status payload (``status`` + ``publish_id``).
+    """
+    if not os.path.isfile(video_path):
+        raise TikTokError(f"video not found: {video_path}")
+
+    token = access_token or get_valid_access_token()
+    video_size = os.path.getsize(video_path)
+    upload_plan = build_upload_plan(video_size)
+
+    init_body = {"source_info": {"source": "FILE_UPLOAD", **upload_plan}}
+    logger.info(f"tiktok: init inbox upload for {video_path} ({video_size} bytes)")
+    init_resp = requests.post(
+        INBOX_INIT_URL, headers=_auth_headers(token), json=init_body, timeout=60
+    )
+    data = _check_envelope(init_resp)
+    publish_id = data.get("publish_id")
+    upload_url = data.get("upload_url")
+    if not publish_id or not upload_url:
+        raise TikTokError(f"inbox init response missing publish_id/upload_url: {data}")
+
+    _put_video_chunks(video_path, video_size, upload_plan, upload_url, publish_id)
 
     if not poll:
         return {"status": "PROCESSING_UPLOAD", "publish_id": publish_id}

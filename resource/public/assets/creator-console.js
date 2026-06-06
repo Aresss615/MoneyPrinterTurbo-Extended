@@ -84,6 +84,7 @@ const els = {
     downloadLink: document.querySelector("#downloadLink"),
     tiktokPill: document.querySelector("#tiktokPill"),
     publishTikTok: document.querySelector("#publishTikTok"),
+    uploadInboxTikTok: document.querySelector("#uploadInboxTikTok"),
     publishStatus: document.querySelector("#publishStatus"),
     publishSettings: document.querySelector("#publishSettings"),
     tiktokPrivacy: document.querySelector("#tiktokPrivacy"),
@@ -387,6 +388,7 @@ async function generateVideo() {
         const taskId = payload.data.task_id;
         currentTaskId = taskId;
         els.publishTikTok.style.display = "none";
+        els.uploadInboxTikTok.style.display = "none";
         setPublishStatus("");
         els.taskStatus.textContent = `Task ${taskId}`;
         els.progressBar.style.width = "5%";
@@ -426,6 +428,7 @@ function pollTask(taskId) {
                 setStatus("Video complete.", "good");
                 showOutput(task.videos && task.videos[0]);
                 els.publishTikTok.style.display = "block";
+                els.uploadInboxTikTok.style.display = "block";
             } else if (task.state === -1) {
                 window.clearInterval(pollTimer);
                 setGenerating(false);
@@ -599,6 +602,38 @@ async function publishToTikTok() {
     }
 }
 
+async function uploadToTikTokInbox() {
+    if (!currentTaskId) {
+        setPublishStatus("Generate a video first.", "error");
+        return;
+    }
+    els.uploadInboxTikTok.disabled = true;
+    els.uploadInboxTikTok.textContent = "Sending...";
+    setPublishStatus("Uploading draft to your TikTok inbox. This can take a minute.");
+
+    try {
+        const response = await fetch("/api/v1/tiktok/upload-inbox", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ task_id: currentTaskId }),
+        });
+        const payload = await response.json();
+        if (!response.ok || payload.status >= 400) {
+            throw new Error(payload.message || "Inbox upload failed.");
+        }
+        const data = payload.data || {};
+        setPublishStatus(
+            `TikTok inbox: ${data.status || "submitted"}. Open TikTok notifications to finish the post.`,
+            "good"
+        );
+    } catch (error) {
+        setPublishStatus(error.message || "Inbox upload failed.", "error");
+    } finally {
+        els.uploadInboxTikTok.disabled = false;
+        els.uploadInboxTikTok.textContent = "Send to TikTok inbox (draft)";
+    }
+}
+
 function switchTab(tabName) {
     document.querySelectorAll(".tab").forEach((tab) => {
         tab.classList.toggle("active", tab.dataset.tab === tabName);
@@ -651,6 +686,7 @@ function bindEvents() {
     document.querySelector("#generateTop").addEventListener("click", generateVideo);
     document.querySelector("#generateMain").addEventListener("click", generateVideo);
     els.publishTikTok.addEventListener("click", publishToTikTok);
+    els.uploadInboxTikTok.addEventListener("click", uploadToTikTokInbox);
     els.tiktokPill.addEventListener("click", (event) => {
         if (els.tiktokPill.getAttribute("href") === "#") event.preventDefault();
     });

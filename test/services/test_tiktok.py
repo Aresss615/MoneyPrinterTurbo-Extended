@@ -48,7 +48,9 @@ class TestTikTokService(unittest.TestCase):
             url = tiktok.build_authorize_url("xyz-state")
 
         self.assertIn("client_key=abc", url)
-        self.assertIn("scope=video.publish", url)
+        self.assertIn(
+            "scope=user.info.basic%2Cvideo.publish%2Cvideo.upload", url
+        )
         self.assertIn("state=xyz-state", url)
         self.assertIn("response_type=code", url)
         self.assertIn("redirect_uri=https%3A%2F%2Fdev.example.com%2Fcb", url)
@@ -214,6 +216,56 @@ class TestTikTokService(unittest.TestCase):
             f"bytes {plan['chunk_size']}-{video_size - 1}/{video_size}",
         )
         self.assertEqual(result["status"], "PROCESSING_UPLOAD")
+
+    def test_query_user_info_returns_basic_profile(self):
+        from app.services import tiktok
+
+        resp = _ok({"user": {"display_name": "Jules", "open_id": "open-9"}})
+        with patch.object(tiktok.requests, "get", return_value=resp) as get:
+            user = tiktok.query_user_info(token="tok")
+
+        self.assertEqual(user["display_name"], "Jules")
+        self.assertEqual(get.call_args.args[0], tiktok.USER_INFO_URL)
+        self.assertEqual(
+            get.call_args.kwargs["headers"]["Authorization"], "Bearer tok"
+        )
+        self.assertEqual(
+            get.call_args.kwargs["params"]["fields"], tiktok.USER_INFO_FIELDS
+        )
+
+    def test_upload_video_to_inbox_runs_init_upload_status_sequence(self):
+        from app.services import tiktok
+
+        init_resp = _ok({"publish_id": "inbox-1", "upload_url": "https://upload"})
+        status_resp = _ok({"status": "PUBLISH_COMPLETE", "publish_id": "inbox-1"})
+        put_resp = MagicMock(status_code=201)
+        put_resp.raise_for_status.return_value = None
+
+        with patch.object(tiktok.os.path, "isfile", return_value=True), patch.object(
+            tiktok.os.path, "getsize", return_value=2048
+        ), patch.object(
+            tiktok, "_iter_video_chunks", return_value=[(0, 2047, b"x" * 2048)]
+        ), patch.object(
+            tiktok.requests, "post", side_effect=[init_resp, status_resp]
+        ) as post, patch.object(
+            tiktok.requests, "put", return_value=put_resp
+        ) as put:
+            result = tiktok.upload_video_to_inbox(
+                "/tmp/final.mp4", access_token="tok", poll_interval=0
+            )
+
+        # inbox init then status
+        self.assertEqual(post.call_args_list[0].args[0], tiktok.INBOX_INIT_URL)
+        self.assertEqual(post.call_args_list[1].args[0], tiktok.PUBLISH_STATUS_URL)
+        # inbox init carries the FILE_UPLOAD source and NO post_info
+        init_body = post.call_args_list[0].kwargs["json"]
+        self.assertNotIn("post_info", init_body)
+        self.assertEqual(init_body["source_info"]["source"], "FILE_UPLOAD")
+        self.assertEqual(init_body["source_info"]["video_size"], 2048)
+        put.assert_called_once()
+        self.assertEqual(put.call_args.args[0], "https://upload")
+        self.assertEqual(result["status"], "PUBLISH_COMPLETE")
+        self.assertEqual(result["publish_id"], "inbox-1")
 
     def test_publish_video_raises_on_api_error(self):
         from app.services import tiktok

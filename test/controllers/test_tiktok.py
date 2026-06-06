@@ -100,6 +100,53 @@ class TestTikTokApi(unittest.TestCase):
             publish.call_args.kwargs["hashtags"], ["#aita", "#redditstories"]
         )
 
+    def test_status_surfaces_user_info_display_name(self):
+        with patch.object(tiktok, "is_configured", return_value=True), patch.object(
+            tiktok, "load_token_cache", return_value={"access_token": "tok"}
+        ), patch.object(
+            tiktok, "query_user_info", return_value={"display_name": "Jules"}
+        ), patch.object(
+            tiktok, "query_creator_info", return_value={}
+        ):
+            response = self.client.get("/api/v1/tiktok/status")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertTrue(data["connected"])
+        self.assertEqual(data["nickname"], "Jules")
+        self.assertEqual(data["user_info"]["display_name"], "Jules")
+
+    def test_upload_inbox_returns_404_when_video_missing(self):
+        response = self.client.post(
+            "/api/v1/tiktok/upload-inbox", json={"task_id": "no-such-task-xyz"}
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_upload_inbox_sends_finished_video(self):
+        task_id = "tiktok-inbox-test"
+        task_path = Path(utils.task_dir(task_id))
+        (task_path / "final-1.mp4").write_bytes(b"fake-video")
+        try:
+            with patch.object(
+                tiktok,
+                "upload_video_to_inbox",
+                return_value={"status": "PUBLISH_COMPLETE", "publish_id": "inbox-1"},
+            ) as upload:
+                response = self.client.post(
+                    "/api/v1/tiktok/upload-inbox", json={"task_id": task_id}
+                )
+        finally:
+            try:
+                os.remove(task_path / "final-1.mp4")
+            except OSError:
+                pass
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["status"], "PUBLISH_COMPLETE")
+        upload.assert_called_once()
+        self.assertTrue(upload.call_args.args[0].endswith("final-1.mp4"))
+
     def test_callback_rejects_invalid_oauth_state(self):
         with patch.object(
             tiktok, "consume_oauth_state", return_value=False, create=True

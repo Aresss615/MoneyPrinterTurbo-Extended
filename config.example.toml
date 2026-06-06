@@ -222,7 +222,8 @@ hide_log = false
 [tiktok]
 # TikTok Content Posting API (Direct Post) credentials.
 # Register an app at https://developers.tiktok.com, add the "Content Posting API"
-# product, and request the video.publish scope (Direct Post). See SETUP_NOTES.md.
+# product. Scopes: video.publish (Direct Post), video.upload (inbox draft),
+# user.info.basic (connected account name). See SETUP_NOTES.md.
 client_key = ""
 client_secret = ""
 # Must exactly match an HTTPS redirect URI registered on your TikTok app.
