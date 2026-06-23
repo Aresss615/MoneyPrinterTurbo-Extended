@@ -3,6 +3,8 @@ import math
 import os
 import random
 import re
+import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -19,23 +21,26 @@ GAMEPLAY_DIR = ROOT_DIR / "gameplay"
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".flv", ".webm", ".m4v"}
 DEFAULT_VOICE_NAME = "chatterbox:default:Default Voice-Neutral"  # fallback only
 DEFAULT_CARD_USERNAME = "u/throwaway_aita"
-DEFAULT_MIN_VIDEO_DURATION = 60
+DEFAULT_MIN_VIDEO_DURATION = 60  # "story" lane floor (seconds)
+DEFAULT_MIN_GROWTH = 30  # "growth" lane floor — lets ~35-50s cuts stay short
 CAPTION_FONT = "Montserrat-ExtraBold.ttf"
 CAPTION_FONT_SIZE = 64
 CAPTION_STROKE_WIDTH = 3
 SHORT_FORM_WORDS_PER_MINUTE = 165
+# Slightly faster than a default read for momentum, the pace a faceless
+# Reddit-story clip wants (faster than conversation, slower than synthetic
+# overload). Applied via edge-tts in voice.azure_tts_v1.
+DEFAULT_VOICE_RATE = 1.1
 
-# Free Edge-TTS voices rotated at random per video for variety. Word-level
-# caption highlighting is preserved automatically (the audio is re-transcribed
-# independently of the TTS engine). Edit this list to taste.
+# A small, curated set of distinctive Edge-TTS voices rotated per video. The
+# playbook warns that near-identical synthetic voices make faceless accounts
+# interchangeable, so the pool is deliberately short and characterful while
+# keeping both genders so resolve_narrator_gender -> pick_voice still works.
+# Word-level caption highlighting is preserved automatically (the audio is
+# re-transcribed independently of the TTS engine).
 VOICE_POOL = [
-    "en-US-AvaNeural-Female",
     "en-US-AndrewNeural-Male",
-    "en-US-EmmaNeural-Female",
-    "en-US-BrianNeural-Male",
-    "en-US-JennyNeural-Female",
-    "en-US-GuyNeural-Male",
-    "en-GB-SoniaNeural-Female",
+    "en-US-AvaNeural-Female",
     "en-GB-RyanNeural-Male",
     "en-AU-NatashaNeural-Female",
 ]
@@ -156,25 +161,45 @@ def resolve_narrator_gender(story: "CreatorStory") -> str:
     return ""
 
 
-CHATGPT_IDEA_PROMPT = """Browse Reddit for a strong short-form story suitable for a faceless TikTok/Reels video.
+CHATGPT_IDEA_PROMPT = """You are the story scout and scriptwriter for a faceless Reddit-story TikTok account. The account wins on RETENTION, not volume: a strong hook, fast escalation, a reversal, and a verdict question. Find ONE public Reddit story and turn it into a tight spoken script.
 
-Target style:
-- AITA, relationship drama, entitled people, workplace drama, family conflict, travel/airplane conflict, or roommate conflict
-- Clear conflict in the first 2 seconds
-- Strong moral dilemma or rage-bait hook
-- 60-75 seconds when read aloud
-- First-person narration
-- Easy to understand without Reddit context
-- Safe for monetized short-form content
+Niche — pick EXACTLY ONE territory and make the story clearly belong to it:
+1. Family betrayal & inheritance (wills, money, favoritism, hidden paperwork, family duty)
+2. Relationship & wedding implosions (cheating, broken engagements, wedding/in-law drama)
+3. Workplace revenge & boundaries (unfair bosses, stolen credit, malicious compliance, punished for an emergency)
 
-Rules:
+Retention rules (most important):
+- Open AT the moment of conflict. The first sentence is the hook — no backstory, no "so for context".
+- Escalate every 5-8 seconds: each beat adds a new fact, stake, secret, or shift in sympathy.
+- Include at least one "wait, what?" reversal — a reveal that recontextualizes the story.
+- End on a verdict question, never a generic "what do you think" or "part 2".
+
+Pacing template the narration MUST follow:
+- 0-3s Hook: start at the conflict.
+- 3-8s Premise: who did what to whom.
+- 8-15s Friction: the first complicating fact.
+- 15-25s Escalation: a new stake, secret, or contradiction.
+- 25-40s Reversal: the "wait, what?" beat.
+- Final beat: the verdict question.
+
+Length lane (choose one and write to its word count):
+- "growth": 90-130 words (~35-50s read aloud). Tighter, one clean reversal.
+- "story": 170-260 words (~60-95s read aloud). Room for a second stake and a deeper reversal.
+Default to "story" unless the source is too thin to sustain it.
+
+Frame one — comment_card_title is the first thing the viewer sees: a 6-10 word punchy line that STATES the conflict (not a full Reddit title, not a summary).
+
+Write for speech, not reading:
+- Vary sentence length. Use short, punchy sentences at the reversal.
+- Natural spoken phrasing a TTS voice can read with momentum.
+
+Safety & ethics:
 - Use only public Reddit posts.
-- Do not include real names, usernames, locations, workplaces, or identifying details.
-- Do not invent a Reddit source URL. If you cannot verify a source, say so.
-- Paraphrase the story into a clean narration script instead of copying the post word-for-word.
+- Do not include real names, usernames, locations, workplaces, schools, or identifying details.
+- Do not invent a Reddit source URL. If you cannot verify a source, leave it blank.
+- Paraphrase into a clean narration script instead of copying the post word-for-word.
 - Keep the emotional conflict, but remove rambling, edits, updates, and unnecessary details.
-- Make it sound natural when spoken by TTS.
-- End with a question that invites comments.
+- Keep it safe for monetized short-form content (no graphic sexual content, explicit violence, or minors in harm).
 
 Output format (READ CAREFULLY — invalid JSON cannot be imported):
 - Return ONE single, complete JSON object and NOTHING else: no prose before or after, no code fences, no comments.
@@ -190,6 +215,8 @@ Return ONLY this JSON:
   "source_url": "",
   "subreddit": "",
   "original_title": "",
+  "territory": "",
+  "length_lane": "story",
   "comment_card_username": "u/throwaway_aita",
   "comment_card_title": "",
   "comment_card_likes": "99+",
@@ -197,6 +224,7 @@ Return ONLY this JSON:
   "narration_script": "",
   "caption_keywords_to_highlight": [],
   "suggested_hook": "",
+  "comment_prompt": "",
   "suggested_description": "",
   "suggested_hashtags": [],
   "content_notes": "",
@@ -204,11 +232,14 @@ Return ONLY this JSON:
 }
 
 Field rules:
-- comment_card_title: max 120 characters, written like a Reddit post title.
-- narration_script: 170-230 words, first person, no markdown, no bullet points.
+- territory: which ONE niche this belongs to — "family", "relationship", or "workplace".
+- length_lane: "growth" (90-130 words) or "story" (170-260 words).
+- comment_card_title: 6-10 words that STATE the conflict, written like a punchy Reddit title. This is frame one — the first thing the viewer sees.
+- narration_script: first person, follows the pacing template, word count set by length_lane, no markdown, no bullet points.
 - caption_keywords_to_highlight: 8-15 short words or phrases that should be red-highlighted in captions.
-- suggested_hook: one short sentence for the first 2 seconds.
-- suggested_description: TikTok/Reels caption, max 150 characters.
+- suggested_hook: the first narrated sentence — the conflict, in one line.
+- comment_prompt: the closing verdict question. Use one of: "NTA or YTA?", "Was OP wrong or justified?", "Who was actually in the wrong?", "What would you do?", "Would you cut them off?". Never "part 2" or "comment below".
+- suggested_description: TikTok/Reels caption, max 150 characters, plain-language and keyworded for search (name the theme, e.g. "AITA inheritance family drama"), ending with the comment_prompt question.
 - suggested_hashtags: 5-8 hashtags.
 - content_notes: mention if anything was softened, anonymized, or potentially sensitive.
 - narrator_gender: "male" or "female" — the gender of the first-person narrator telling the story, inferred from the content. Use "" only if genuinely ambiguous."""
@@ -218,6 +249,8 @@ class CreatorStory(BaseModel):
     source_url: str = ""
     subreddit: str = ""
     original_title: str = ""
+    territory: str = ""
+    length_lane: str = "story"
     comment_card_username: str = DEFAULT_CARD_USERNAME
     comment_card_title: str = ""
     comment_card_likes: str = "99+"
@@ -225,10 +258,17 @@ class CreatorStory(BaseModel):
     narration_script: str
     caption_keywords_to_highlight: list[str] = Field(default_factory=list)
     suggested_hook: str = ""
+    comment_prompt: str = ""
     suggested_description: str = ""
     suggested_hashtags: list[str] = Field(default_factory=list)
     content_notes: str = ""
     narrator_gender: str = ""
+
+
+def normalize_length_lane(value: Any) -> str:
+    """Coerce a length-lane value to ``"growth"`` or ``"story"`` (default)."""
+    lane = clean_text(value).lower()
+    return lane if lane in ("growth", "story") else "story"
 
 
 def estimate_read_seconds(script: str, words_per_minute: int = SHORT_FORM_WORDS_PER_MINUTE) -> int:
@@ -288,10 +328,21 @@ def story_from_mapping(payload: dict[str, Any]) -> CreatorStory:
     if not title:
         title = derive_card_title(narration)
 
+    comment_prompt = clean_text(payload.get("comment_prompt") or "")
+    description = truncate_text(
+        clean_text(payload.get("suggested_description") or ""), 150
+    )
+    # Growth posts skip the long caption; fall back to the verdict prompt so
+    # every clip still ships a judgment-oriented, comment-driving caption.
+    if not description and comment_prompt:
+        description = truncate_text(comment_prompt, 150)
+
     return CreatorStory(
         source_url=clean_text(payload.get("source_url") or ""),
         subreddit=clean_text(payload.get("subreddit") or ""),
         original_title=clean_text(payload.get("original_title") or ""),
+        territory=clean_text(payload.get("territory") or "").lower(),
+        length_lane=normalize_length_lane(payload.get("length_lane")),
         comment_card_username=clean_text(
             payload.get("comment_card_username") or DEFAULT_CARD_USERNAME
         ),
@@ -303,9 +354,8 @@ def story_from_mapping(payload: dict[str, Any]) -> CreatorStory:
             payload.get("caption_keywords_to_highlight") or []
         ),
         suggested_hook=clean_text(payload.get("suggested_hook") or ""),
-        suggested_description=truncate_text(
-            clean_text(payload.get("suggested_description") or ""), 150
-        ),
+        comment_prompt=comment_prompt,
+        suggested_description=description,
         suggested_hashtags=normalize_hashtags(payload.get("suggested_hashtags") or []),
         content_notes=clean_text(payload.get("content_notes") or ""),
         narrator_gender=normalize_narrator_gender(payload.get("narrator_gender") or ""),
@@ -322,8 +372,11 @@ def build_video_params(story: CreatorStory, rng=random) -> VideoParams:
     # Persist the resolved gender so the dumped story.json is debuggable next time.
     story.narrator_gender = gender
     voice_name = pick_voice(rng, gender=gender)
+    lane = normalize_length_lane(story.length_lane)
+    min_duration = DEFAULT_MIN_GROWTH if lane == "growth" else DEFAULT_MIN_VIDEO_DURATION
     logger.info(
-        f"narrator gender resolved to '{gender or 'unknown'}' → voice {voice_name}"
+        f"narrator gender resolved to '{gender or 'unknown'}' → voice {voice_name}; "
+        f"length lane '{lane}' → min_video_duration {min_duration}s"
     )
     return VideoParams(
         video_subject=story.video_subject or title or "AITA story",
@@ -339,7 +392,7 @@ def build_video_params(story: CreatorStory, rng=random) -> VideoParams:
         video_language="en",
         voice_name=voice_name,
         voice_volume=1.0,
-        voice_rate=1.0,
+        voice_rate=DEFAULT_VOICE_RATE,
         bgm_type="",
         bgm_file="",
         bgm_volume=0.0,
@@ -361,7 +414,7 @@ def build_video_params(story: CreatorStory, rng=random) -> VideoParams:
         comment_card_title=title,
         comment_card_likes=story.comment_card_likes or "99+",
         comment_card_duration=4.0,
-        min_video_duration=DEFAULT_MIN_VIDEO_DURATION,
+        min_video_duration=min_duration,
         n_threads=2,
         paragraph_number=1,
     )
@@ -551,6 +604,10 @@ def publish_marker_path(task_id: str) -> str:
     return os.path.join(utils.task_dir(task_id), "publish.json")
 
 
+def facebook_publish_marker_path(task_id: str) -> str:
+    return os.path.join(utils.task_dir(task_id), "facebook_publish.json")
+
+
 def record_publish(task_id: str, method: str, result: dict) -> None:
     """Persist that a video was sent to TikTok."""
     marker = {
@@ -563,6 +620,17 @@ def record_publish(task_id: str, method: str, result: dict) -> None:
         json.dump(marker, fp, indent=2)
 
 
+def record_facebook_publish(task_id: str, result: dict) -> None:
+    """Persist that a video was posted to a Facebook Page."""
+    marker = {
+        "method": "facebook",
+        "video_id": result.get("id", ""),
+        "posted_at": time.time(),
+    }
+    with open(facebook_publish_marker_path(task_id), "w", encoding="utf-8") as fp:
+        json.dump(marker, fp, indent=2)
+
+
 def load_publish_marker(task_id: str) -> dict:
     path = publish_marker_path(task_id)
     if not os.path.isfile(path):
@@ -572,6 +640,32 @@ def load_publish_marker(task_id: str) -> dict:
             return json.load(fp)
     except (ValueError, OSError):
         return {}
+
+
+def load_facebook_publish_marker(task_id: str) -> dict:
+    path = facebook_publish_marker_path(task_id)
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as fp:
+            return json.load(fp)
+    except (ValueError, OSError):
+        return {}
+
+
+def reveal_path_in_file_manager(path: str) -> None:
+    """Ask the local OS to reveal a generated file in its file manager."""
+    target = Path(path).resolve()
+    if not target.exists():
+        raise FileNotFoundError(str(target))
+
+    if sys.platform == "darwin":
+        command = ["open", "-R", str(target)]
+    elif sys.platform.startswith("win"):
+        command = ["explorer", f"/select,{target}"]
+    else:
+        command = ["xdg-open", str(target.parent if target.is_file() else target)]
+    subprocess.Popen(command)
 
 
 def slugify(text: str, max_len: int = 60) -> str:
@@ -599,6 +693,7 @@ def list_library_videos() -> list[dict]:
                 story = {}
         title = story.get("comment_card_title") or story.get("video_subject") or task_id
         marker = load_publish_marker(task_id)
+        fb_marker = load_facebook_publish_marker(task_id)
         items.append(
             {
                 "task_id": task_id,
@@ -608,6 +703,7 @@ def list_library_videos() -> list[dict]:
                 "created_at": os.path.getmtime(video_path),
                 "size_bytes": os.path.getsize(video_path),
                 "posted": marker,
+                "facebook_posted": fb_marker,
                 "suggested_description": story.get("suggested_description", ""),
                 "suggested_hashtags": story.get("suggested_hashtags", []),
             }

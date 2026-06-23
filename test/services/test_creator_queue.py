@@ -273,6 +273,49 @@ class TestCreatorQueue(unittest.TestCase):
             creator_queue.load_queue_item(item.queue_id).status, "canceled"
         )
 
+    def test_clear_finished_queue_items_removes_terminal_items_and_keeps_active_work(self):
+        from app.services import creator_queue
+        from app.utils import utils
+
+        statuses = [
+            "queued",
+            "rendering",
+            "rendered",
+            "scheduled",
+            "dispatching",
+            "sent",
+            "failed",
+            "canceled",
+        ]
+        for status in statuses:
+            item = creator_queue.import_queue_items(
+                json.dumps(self._story_payload(status.title()))
+            )[0]
+            item.status = status
+            if status != "queued":
+                item.task_id = f"{status}-task"
+                task_path = Path(utils.task_dir(item.task_id))
+                if status != "rendering":
+                    (task_path / "final-1.mp4").write_bytes(b"video")
+            creator_queue.save_queue_item(item)
+
+        removed = creator_queue.clear_finished_queue_items()
+        remaining = creator_queue.list_queue_items()
+
+        self.assertEqual(
+            [item.status for item in removed],
+            ["rendered", "sent", "failed", "canceled"],
+        )
+        self.assertEqual(
+            [item.status for item in remaining],
+            ["queued", "rendering", "scheduled", "dispatching"],
+        )
+        self.assertEqual([item.position for item in remaining], [1, 2, 3, 4])
+        for status in ("rendered", "sent", "failed", "canceled"):
+            self.assertFalse((self.temp_root / "tasks" / f"{status}-task").exists())
+        for status in ("rendering", "scheduled", "dispatching"):
+            self.assertTrue((self.temp_root / "tasks" / f"{status}-task").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -28,3 +28,6 @@ venv/
 .venv
 # Local Claude Code agent state
 .claude/
+
+# Runtime server log
+server.log

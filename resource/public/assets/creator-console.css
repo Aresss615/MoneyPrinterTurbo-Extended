@@ -935,6 +935,10 @@ a.ghost-button {
     text-decoration: underline;
 }
 
+.file-location-button {
+    margin-top: 10px;
+}
+
 .status-message {
     min-height: 18px;
     margin: 0;
@@ -1051,4 +1055,20 @@ a.ghost-button {
     .prompt-box {
         min-height: 240px;
     }
+}
+
+/* Facebook integration */
+.library-badge.fb-badge {
+    color: #1e3a8a;
+    background: #dbeafe;
+}
+
+.ghost-button.fb-button {
+    color: #1877f2;
+    border-color: #1877f2;
+}
+
+.ghost-button.fb-button:hover {
+    background: #1877f2;
+    color: #fff;
 }

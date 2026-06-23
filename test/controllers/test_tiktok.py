@@ -120,6 +120,61 @@ class TestTikTokApi(unittest.TestCase):
         self.assertEqual(data["nickname"], "Jules")
         self.assertEqual(data["user_info"]["display_name"], "Jules")
 
+    def test_status_hides_connected_account_without_creator_access_key(self):
+        with patch.object(tiktok.config, "app", {"creator_access_key": "owner"}), patch.object(
+            tiktok, "is_configured", return_value=True
+        ), patch.object(
+            tiktok, "load_token_cache", return_value={"access_token": "tok"}
+        ), patch.object(tiktok, "query_user_info") as query_user_info, patch.object(
+            tiktok, "query_creator_info"
+        ) as query_creator_info:
+            response = self.client.get("/api/v1/tiktok/status")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertTrue(data["configured"])
+        self.assertTrue(data["locked"])
+        self.assertFalse(data["connected"])
+        self.assertEqual(data["nickname"], "")
+        query_user_info.assert_not_called()
+        query_creator_info.assert_not_called()
+
+    def test_auth_url_requires_creator_access_key_when_configured(self):
+        with patch.object(tiktok.config, "app", {"creator_access_key": "owner"}), patch.object(
+            tiktok.config,
+            "tiktok",
+            {"client_key": "abc", "redirect_uri": "https://dev.example.com/cb"},
+        ), patch.object(tiktok, "save_oauth_state", create=True) as save_state:
+            response = self.client.get("/api/v1/tiktok/auth-url")
+
+        self.assertEqual(response.status_code, 401)
+        save_state.assert_not_called()
+
+    def test_publish_requires_creator_access_key_when_configured(self):
+        task_id = "tiktok-publish-locked"
+        task_path = Path(utils.task_dir(task_id))
+        (task_path / "final-1.mp4").write_bytes(b"fake-video")
+
+        try:
+            with patch.object(
+                tiktok.config, "app", {"creator_access_key": "owner"}
+            ), patch.object(
+                tiktok,
+                "publish_video",
+                return_value={"status": "PUBLISH_COMPLETE", "publish_id": "p1"},
+            ) as publish:
+                response = self.client.post(
+                    "/api/v1/tiktok/publish", json={"task_id": task_id}
+                )
+        finally:
+            try:
+                os.remove(task_path / "final-1.mp4")
+            except OSError:
+                pass
+
+        self.assertEqual(response.status_code, 401)
+        publish.assert_not_called()
+
     def test_upload_inbox_returns_404_when_video_missing(self):
         response = self.client.post(
             "/api/v1/tiktok/upload-inbox", json={"task_id": "no-such-task-xyz"}
@@ -158,6 +213,30 @@ class TestTikTokApi(unittest.TestCase):
         self.assertEqual(marker["method"], "inbox")
         self.assertEqual(marker["status"], "PUBLISH_COMPLETE")
         self.assertEqual(marker["publish_id"], "inbox-1")
+
+    def test_upload_inbox_requires_creator_access_key_when_configured(self):
+        task_id = "tiktok-inbox-locked"
+        task_path = Path(utils.task_dir(task_id))
+        (task_path / "final-1.mp4").write_bytes(b"fake-video")
+        try:
+            with patch.object(
+                tiktok.config, "app", {"creator_access_key": "owner"}
+            ), patch.object(
+                tiktok,
+                "upload_video_to_inbox",
+                return_value={"status": "PUBLISH_COMPLETE", "publish_id": "inbox-1"},
+            ) as upload:
+                response = self.client.post(
+                    "/api/v1/tiktok/upload-inbox", json={"task_id": task_id}
+                )
+        finally:
+            try:
+                os.remove(task_path / "final-1.mp4")
+            except OSError:
+                pass
+
+        self.assertEqual(response.status_code, 401)
+        upload.assert_not_called()
 
     def test_callback_rejects_invalid_oauth_state(self):
         with patch.object(

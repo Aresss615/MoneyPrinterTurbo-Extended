@@ -173,6 +173,11 @@ redis_password = ""
 # 文生视频时的最大并发任务数
 max_concurrent_tasks = 5
 
+# Optional owner key for public creator-console tunnels. When set, TikTok OAuth,
+# TikTok publish/draft uploads, and TikTok schedules require this value in the
+# X-Creator-Access-Key header. The browser stores it locally after unlock.
+creator_access_key = ""
+
 
 [whisper]
 # Only effective when subtitle_provider is "whisper"
@@ -240,3 +245,13 @@ brand_organic_toggle = false
 is_aigc = false
 # Frame (in milliseconds) used for the auto-generated cover thumbnail.
 cover_timestamp_ms = 1000
+
+[facebook]
+# Facebook Page ID to post videos to.
+# Find it at facebook.com/your-page/about or via the Graph API Explorer.
+page_id = ""
+# Page Access Token.  Leave blank and use POST /api/v1/facebook/set-token
+# to save it securely in storage/facebook_token.json instead.
+page_access_token = ""
+# Set to false to keep the video as an unpublished draft on the page.
+published = true

@@ -125,13 +125,17 @@ def _load_library_story(task_id: str) -> creator_console.CreatorStory:
         raise HttpException(task_id=task_id, status_code=400, message=str(exc))
 
 
-def _validate_schedule(schedule: creator_queue.CreatorQueueSchedule) -> None:
+def _validate_schedule(
+    schedule: creator_queue.CreatorQueueSchedule, request: Request | None = None
+) -> None:
     if schedule.run_at_epoch <= 0:
         raise HttpException(
             task_id="creator-queue",
             status_code=400,
             message="schedule run_at_epoch is required",
         )
+    if request is not None:
+        base.require_creator_access(request, task_id="creator-queue")
     if schedule.action != "direct":
         return
     if not schedule.privacy:
@@ -200,7 +204,7 @@ def get_idea_prompt(request: Request):
         {
             "prompt": creator_console.CHATGPT_IDEA_PROMPT,
             "minimum_seconds": creator_console.DEFAULT_MIN_VIDEO_DURATION,
-            "target_words": "170-230",
+            "target_words": "170-260",
         },
     )
 
@@ -287,10 +291,23 @@ def process_creator_queue(request: Request, body: QueueProcessRequest | None = N
     )
 
 
+@router.delete("/creator/queue/finished", summary="Clear finished story queue items")
+def clear_finished_creator_queue(request: Request):
+    deleted = creator_queue.clear_finished_queue_items()
+    return utils.get_response(
+        200,
+        {
+            "deleted": len(deleted),
+            "deleted_ids": [item.queue_id for item in deleted],
+            "deleted_statuses": [item.status for item in deleted],
+        },
+    )
+
+
 @router.patch("/creator/queue/{queue_id}", summary="Update a story queue item")
 def update_creator_queue_item(request: Request, queue_id: str, body: QueuePatchRequest):
     if "schedule" in body.model_fields_set and body.schedule is not None:
-        _validate_schedule(body.schedule)
+        _validate_schedule(body.schedule, request)
     try:
         item = creator_queue.update_queue_item(
             queue_id,
@@ -377,6 +394,30 @@ def delete_creator_library_video(request: Request, task_id: str):
 
 
 @router.post(
+    "/creator/library/{task_id}/reveal",
+    summary="Reveal a generated creator video in the local file manager",
+)
+def reveal_creator_library_video(request: Request, task_id: str):
+    task_path = _library_task_path(task_id)
+    video_path = os.path.join(task_path, "final-1.mp4")
+    if not os.path.isfile(video_path):
+        raise HttpException(
+            task_id=task_id,
+            status_code=404,
+            message=f"finished video not found for task {task_id}",
+        )
+    try:
+        creator_console.reveal_path_in_file_manager(video_path)
+    except OSError as exc:
+        raise HttpException(
+            task_id=task_id,
+            status_code=500,
+            message=f"could not open file location: {exc}",
+        ) from exc
+    return utils.get_response(200, {"task_id": task_id, "path": video_path})
+
+
+@router.post(
     "/creator/library/{task_id}/regenerate",
     summary="Regenerate a creator video from stored story metadata",
 )
@@ -411,7 +452,7 @@ def schedule_creator_library_video(
             status_code=404,
             message=f"finished video not found for task {task_id}",
         )
-    _validate_schedule(body.schedule)
+    _validate_schedule(body.schedule, request)
     story = _load_library_story(task_id)
     item = creator_queue.create_scheduled_item_for_task(
         task_id,

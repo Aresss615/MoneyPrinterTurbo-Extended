@@ -1,26 +1,49 @@
-const MIN_SECONDS = 60;
+const MIN_SECONDS = 60; // "story" lane minimum
+const GROWTH_MIN_SECONDS = 30; // "growth" lane minimum
 const WORDS_PER_MINUTE = 165;
 const STORAGE_KEY = "jc-video-factory-draft-v1";
+const CREATOR_ACCESS_KEY_STORAGE = "jc-video-factory-creator-access-key-v1";
 
-const fallbackPrompt = `Browse Reddit for a strong short-form story suitable for a faceless TikTok/Reels video.
+// Offline safety-net only: the live prompt is fetched from
+// GET /api/v1/creator/idea-prompt (served from creator_console.CHATGPT_IDEA_PROMPT).
+// This mirrors that prompt minus the backtick-heavy strict-JSON paragraph, which
+// cannot live inside a template literal.
+const fallbackPrompt = `You are the story scout and scriptwriter for a faceless Reddit-story TikTok account. The account wins on RETENTION, not volume: a strong hook, fast escalation, a reversal, and a verdict question. Find ONE public Reddit story and turn it into a tight spoken script.
 
-Target style:
-- AITA, relationship drama, entitled people, workplace drama, family conflict, travel/airplane conflict, or roommate conflict
-- Clear conflict in the first 2 seconds
-- Strong moral dilemma or rage-bait hook
-- 60-75 seconds when read aloud
-- First-person narration
-- Easy to understand without Reddit context
-- Safe for monetized short-form content
+Niche — pick EXACTLY ONE territory and make the story clearly belong to it:
+1. Family betrayal & inheritance (wills, money, favoritism, hidden paperwork, family duty)
+2. Relationship & wedding implosions (cheating, broken engagements, wedding/in-law drama)
+3. Workplace revenge & boundaries (unfair bosses, stolen credit, malicious compliance, punished for an emergency)
 
-Rules:
+Retention rules (most important):
+- Open AT the moment of conflict. The first sentence is the hook — no backstory.
+- Escalate every 5-8 seconds: each beat adds a new fact, stake, secret, or shift in sympathy.
+- Include at least one "wait, what?" reversal that recontextualizes the story.
+- End on a verdict question, never a generic "what do you think" or "part 2".
+
+Pacing template the narration MUST follow:
+- 0-3s Hook: start at the conflict.
+- 3-8s Premise: who did what to whom.
+- 8-15s Friction: the first complicating fact.
+- 15-25s Escalation: a new stake, secret, or contradiction.
+- 25-40s Reversal: the "wait, what?" beat.
+- Final beat: the verdict question.
+
+Length lane (choose one and write to its word count):
+- "growth": 90-130 words (~35-50s read aloud). Tighter, one clean reversal.
+- "story": 170-260 words (~60-95s read aloud). Room for a second stake and a deeper reversal.
+Default to "story" unless the source is too thin.
+
+Frame one — comment_card_title is the first thing the viewer sees: a 6-10 word punchy line that STATES the conflict.
+
+Safety & ethics:
 - Use only public Reddit posts.
-- Do not include real names, usernames, locations, workplaces, or identifying details.
-- Do not invent a Reddit source URL. If you cannot verify a source, say so.
-- Paraphrase the story into a clean narration script instead of copying the post word-for-word.
-- Keep the emotional conflict, but remove rambling, edits, updates, and unnecessary details.
-- Make it sound natural when spoken by TTS.
-- End with a question that invites comments.
+- Do not include real names, usernames, locations, workplaces, schools, or identifying details.
+- Do not invent a Reddit source URL. If you cannot verify a source, leave it blank.
+- Paraphrase into a clean narration script instead of copying the post word-for-word.
+- Keep it safe for monetized short-form content.
+
+Return ONE complete JSON object and nothing else (no code fences, no comments, no trailing commas). Use straight double quotes; escape inner quotes; write each value on one line.
 
 Return ONLY this JSON:
 
@@ -28,6 +51,8 @@ Return ONLY this JSON:
   "source_url": "",
   "subreddit": "",
   "original_title": "",
+  "territory": "",
+  "length_lane": "story",
   "comment_card_username": "u/throwaway_aita",
   "comment_card_title": "",
   "comment_card_likes": "99+",
@@ -35,6 +60,7 @@ Return ONLY this JSON:
   "narration_script": "",
   "caption_keywords_to_highlight": [],
   "suggested_hook": "",
+  "comment_prompt": "",
   "suggested_description": "",
   "suggested_hashtags": [],
   "content_notes": "",
@@ -42,14 +68,17 @@ Return ONLY this JSON:
 }
 
 Field rules:
-- comment_card_title: max 120 characters, written like a Reddit post title.
-- narration_script: 170-230 words, first person, no markdown, no bullet points.
-- caption_keywords_to_highlight: 8-15 short words or phrases that should be red-highlighted in captions.
-- suggested_hook: one short sentence for the first 2 seconds.
-- suggested_description: TikTok/Reels caption, max 150 characters.
+- territory: "family", "relationship", or "workplace".
+- length_lane: "growth" (90-130 words) or "story" (170-260 words).
+- comment_card_title: 6-10 words that STATE the conflict, like a punchy Reddit title.
+- narration_script: first person, follows the pacing template, word count set by length_lane, no markdown.
+- caption_keywords_to_highlight: 8-15 short words or phrases to red-highlight in captions.
+- suggested_hook: the first narrated sentence — the conflict, in one line.
+- comment_prompt: closing verdict question, e.g. "NTA or YTA?", "Who was actually in the wrong?", "What would you do?". Never "part 2".
+- suggested_description: caption, max 150 characters, keyworded for search, ending with the comment_prompt question.
 - suggested_hashtags: 5-8 hashtags.
-- content_notes: mention if anything was softened, anonymized, or potentially sensitive.
-- narrator_gender: "male" or "female" — the gender of the first-person narrator telling the story, inferred from the content. Use "" only if genuinely ambiguous.`;
+- content_notes: note anything softened, anonymized, or sensitive.
+- narrator_gender: "male" or "female" inferred from content. Use "" only if genuinely ambiguous.`;
 
 const sampleStory = `AITA for refusing to give up the window seat I paid extra for? I booked a window seat months before my flight because I get motion sick if I cannot look outside. I also paid extra for it, because the airline made that seat an upgrade. When I boarded, a mom and her son were already in my row. She had the middle and aisle seats, and she asked if I would switch so her son could have the window. I said I was sorry, but I needed the seat I paid for because I get sick. She rolled her eyes and said he was only eight and had been excited all week. I still said no. The whole row stared at me while she made passive aggressive comments about people having no kindness anymore. Her son cried a little, and I felt awful, but I stayed in my seat. My girlfriend says I technically did nothing wrong, but I could have been nicer. So am I the asshole?`;
 
@@ -87,14 +116,16 @@ const els = {
     outputVideo: document.querySelector("#outputVideo"),
     downloadLink: document.querySelector("#downloadLink"),
     manualUploadPanel: document.querySelector("#manualUploadPanel"),
-    manualOpenFile: document.querySelector("#manualOpenFile"),
+    manualRevealFile: document.querySelector("#manualRevealFile"),
     manualDownloadFile: document.querySelector("#manualDownloadFile"),
     manualCaption: document.querySelector("#manualCaption"),
     manualFileName: document.querySelector("#manualFileName"),
     copyManualCaption: document.querySelector("#copyManualCaption"),
     tiktokPill: document.querySelector("#tiktokPill"),
+    facebookPill: document.querySelector("#facebookPill"),
     publishTikTok: document.querySelector("#publishTikTok"),
     uploadInboxTikTok: document.querySelector("#uploadInboxTikTok"),
+    publishFacebook: document.querySelector("#publishFacebook"),
     publishStatus: document.querySelector("#publishStatus"),
     publishSettings: document.querySelector("#publishSettings"),
     tiktokPrivacy: document.querySelector("#tiktokPrivacy"),
@@ -106,6 +137,7 @@ const els = {
     queueJsonInput: document.querySelector("#queueJsonInput"),
     importQueue: document.querySelector("#importQueue"),
     clearQueueJson: document.querySelector("#clearQueueJson"),
+    clearFinishedQueue: document.querySelector("#clearFinishedQueue"),
     startQueue: document.querySelector("#startQueue"),
     pauseQueue: document.querySelector("#pauseQueue"),
     refreshQueue: document.querySelector("#refreshQueue"),
@@ -123,10 +155,19 @@ let pollTimer = null;
 let saveTimer = null;
 let connectionTimer = null;
 let tiktokTimer = null;
+let facebookTimer = null;
 let queueTimer = null;
+let facebookConnected = false;
 let currentTaskId = null;
 let tiktokCreatorInfo = {};
 let currentSuggestedDescription = "";
+let currentLengthLane = "story";
+let currentCommentPrompt = "";
+let currentTerritory = "";
+
+function minSecondsForLane(lane) {
+    return lane === "growth" ? GROWTH_MIN_SECONDS : MIN_SECONDS;
+}
 
 function words(text) {
     return (text || "").match(/\b[\w'-]+\b/g) || [];
@@ -205,6 +246,8 @@ function collectStory() {
         source_url: cleanText(els.sourceUrl.value),
         subreddit: cleanText(els.subreddit.value),
         original_title: "",
+        territory: currentTerritory,
+        length_lane: currentLengthLane,
         comment_card_username: cleanText(els.cardUsername.value) || "u/throwaway_aita",
         comment_card_title: title,
         comment_card_likes: cleanText(els.cardLikes.value) || "99+",
@@ -212,6 +255,7 @@ function collectStory() {
         narration_script: script,
         caption_keywords_to_highlight: highlights,
         suggested_hook: "",
+        comment_prompt: currentCommentPrompt,
         suggested_description: currentSuggestedDescription,
         suggested_hashtags: hashtagsFromInput(els.hashtags.value),
         content_notes: cleanText(els.contentNotes.value),
@@ -232,6 +276,9 @@ function fillFromStory(story) {
     els.contentNotes.value = cleanText(story.content_notes);
     els.narratorGender.value = story.narrator_gender || "";
     currentSuggestedDescription = cleanText(story.suggested_description);
+    currentLengthLane = (cleanText(story.length_lane).toLowerCase() === "growth") ? "growth" : "story";
+    currentCommentPrompt = cleanText(story.comment_prompt);
+    currentTerritory = cleanText(story.territory).toLowerCase();
     updateAll();
     scheduleSave();
 }
@@ -241,7 +288,8 @@ function updateAll() {
     const wordCount = words(story.narration_script).length;
     const seconds = estimateSeconds(story.narration_script);
     const highlights = story.caption_keywords_to_highlight;
-    const meetsMinimum = seconds >= MIN_SECONDS;
+    const minSeconds = minSecondsForLane(story.length_lane);
+    const meetsMinimum = seconds >= minSeconds;
     const hasTitle = Boolean(story.comment_card_title);
 
     els.wordCount.textContent = String(wordCount);
@@ -249,7 +297,7 @@ function updateAll() {
     els.highlightCount.textContent = String(highlights.length);
     els.validationLabel.textContent = meetsMinimum && hasTitle ? "Ready" : "Draft";
 
-    els.durationStatus.textContent = meetsMinimum ? `${seconds}s ready` : `${seconds}s / ${MIN_SECONDS}s min`;
+    els.durationStatus.textContent = meetsMinimum ? `${seconds}s ready` : `${seconds}s / ${minSeconds}s min`;
     els.durationStatus.classList.toggle("good", meetsMinimum);
     els.durationStatus.classList.toggle("bad", wordCount > 0 && !meetsMinimum);
 
@@ -301,6 +349,58 @@ function setStatus(message, type = "") {
     els.statusMessage.className = `status-message ${type}`.trim();
 }
 
+function getCreatorAccessKey() {
+    try {
+        return localStorage.getItem(CREATOR_ACCESS_KEY_STORAGE) || "";
+    } catch (error) {
+        return "";
+    }
+}
+
+function setCreatorAccessKey(value) {
+    try {
+        localStorage.setItem(CREATOR_ACCESS_KEY_STORAGE, value);
+    } catch (error) {
+        // Ignore private-mode storage failures; the current request will still retry.
+    }
+}
+
+function creatorAccessHeaders(headers = {}) {
+    const nextHeaders = { ...headers };
+    const accessKey = getCreatorAccessKey();
+    if (accessKey) {
+        nextHeaders["X-Creator-Access-Key"] = accessKey;
+    }
+    return nextHeaders;
+}
+
+function promptCreatorAccessKey() {
+    const value = window.prompt("Owner access key");
+    if (value === null) return false;
+    const accessKey = cleanText(value);
+    if (!accessKey) return false;
+    setCreatorAccessKey(accessKey);
+    return true;
+}
+
+async function fetchWithCreatorAccess(url, options = {}, retryOnUnauthorized = true) {
+    const requestOptions = {
+        ...options,
+        headers: creatorAccessHeaders(options.headers || {}),
+    };
+    const response = await fetch(url, requestOptions);
+    let payload = {};
+    try {
+        payload = await response.json();
+    } catch (error) {
+        payload = {};
+    }
+    if (response.status === 401 && retryOnUnauthorized && promptCreatorAccessKey()) {
+        return fetchWithCreatorAccess(url, options, false);
+    }
+    return { response, payload };
+}
+
 function humanBytes(bytes) {
     const value = Number(bytes || 0);
     if (value < 1024) return `${value} B`;
@@ -335,9 +435,15 @@ function relativeTime(epochSeconds) {
 function libraryStatusLabel(posted) {
     if (!posted || !Object.keys(posted).length) return "Not posted";
     const age = posted.posted_at ? ` ${relativeTime(posted.posted_at)}` : "";
-    if (posted.method === "inbox") return `Draft sent${age}`;
-    if (posted.method === "direct") return `Posted${age}`;
+    if (posted.method === "inbox") return `TT draft${age}`;
+    if (posted.method === "direct") return `TT posted${age}`;
     return `Sent${age}`;
+}
+
+function facebookStatusLabel(fbPosted) {
+    if (!fbPosted || !Object.keys(fbPosted).length) return null;
+    const age = fbPosted.posted_at ? ` ${relativeTime(fbPosted.posted_at)}` : "";
+    return `FB posted${age}`;
 }
 
 function captionForVideo(video) {
@@ -380,10 +486,11 @@ function manualDownloadName(story) {
 
 function hideManualUpload() {
     els.manualUploadPanel.hidden = true;
-    els.manualOpenFile.href = "#";
+    els.manualRevealFile.disabled = true;
     els.manualDownloadFile.href = "#";
     els.manualCaption.value = "";
     els.manualFileName.textContent = "MP4 file";
+    els.downloadLink.style.display = "none";
 }
 
 function showManualUpload(videoUrl) {
@@ -391,11 +498,39 @@ function showManualUpload(videoUrl) {
     const story = collectStory();
     const filename = manualDownloadName(story);
     els.manualUploadPanel.hidden = false;
-    els.manualOpenFile.href = videoUrl;
+    els.manualRevealFile.disabled = false;
     els.manualDownloadFile.href = videoUrl;
     els.manualDownloadFile.setAttribute("download", filename);
     els.manualCaption.value = captionForStory(story);
     els.manualFileName.textContent = filename;
+}
+
+async function revealVideoFile(taskId, statusEl = null) {
+    if (!taskId) {
+        setPublishStatus("Generate a video first.", "error");
+        return;
+    }
+    const setRevealStatus = (message, type = "") => {
+        if (statusEl) {
+            setCardStatus(statusEl, message, type);
+        } else {
+            setPublishStatus(message, type);
+        }
+    };
+
+    setRevealStatus("Opening file location.");
+    try {
+        const response = await fetch(`/api/v1/creator/library/${encodeURIComponent(taskId)}/reveal`, {
+            method: "POST",
+        });
+        const payload = await response.json();
+        if (!response.ok || payload.status >= 400) {
+            throw new Error(payload.message || "Could not open file location.");
+        }
+        setRevealStatus("File location opened.", "good");
+    } catch (error) {
+        setRevealStatus(error.message || "Could not open file location.", "error");
+    }
 }
 
 async function copyManualCaption() {
@@ -568,6 +703,8 @@ function renderLibrary(videos) {
         const size = humanBytes(video.size_bytes);
         const statusLabel = escapeHtml(libraryStatusLabel(video.posted));
         const statusClass = video.posted && Object.keys(video.posted).length ? "posted" : "pending";
+        const fbLabel = facebookStatusLabel(video.facebook_posted);
+        const fbBadge = fbLabel ? `<span class="library-badge fb-badge">${escapeHtml(fbLabel)}</span>` : "";
         const activeSchedule = latestActiveSchedule(video);
         const scheduleBadge = activeSchedule
             ? `<span class="library-badge ${queueStatusClass(activeSchedule.status)}">${escapeHtml(scheduleSummary(activeSchedule))}</span>`
@@ -579,13 +716,15 @@ function renderLibrary(videos) {
                 <div class="library-card-title-row">
                     <h3>${title}</h3>
                     <span class="library-badge ${statusClass}">${statusLabel}</span>
+                    ${fbBadge}
                     ${scheduleBadge}
                 </div>
                 <p>${escapeHtml(created)} · ${escapeHtml(size)}</p>
                 <div class="library-actions">
-                    <button class="ghost-button" type="button" data-action="inbox">Send draft</button>
-                    <button class="ghost-button" type="button" data-action="publish">Direct Post</button>
-                    <a class="ghost-button" href="${escapeHtml(video.video_url || "#")}" target="_blank" rel="noopener">Open MP4</a>
+                    <button class="ghost-button" type="button" data-action="inbox">TT draft</button>
+                    <button class="ghost-button" type="button" data-action="publish">TT post</button>
+                    <button class="ghost-button fb-button" type="button" data-action="publish-facebook">Post to FB</button>
+                    <button class="ghost-button" type="button" data-action="reveal">Show in Finder</button>
                     <a class="ghost-button" href="${escapeHtml(video.video_url || "#")}" download="${escapeHtml(video.slug || "video")}.mp4">Download MP4</a>
                     <button class="ghost-button" type="button" data-action="copy">Copy caption</button>
                     <button class="ghost-button danger" type="button" data-action="delete">Delete</button>
@@ -610,12 +749,11 @@ function renderLibrary(videos) {
         card.querySelector('[data-action="inbox"]').addEventListener("click", async () => {
             setCardStatus(statusEl, "Sending draft.");
             try {
-                const response = await fetch("/api/v1/tiktok/upload-inbox", {
+                const { response, payload } = await fetchWithCreatorAccess("/api/v1/tiktok/upload-inbox", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ task_id: video.task_id }),
                 });
-                const payload = await response.json();
                 if (!response.ok || payload.status >= 400) {
                     throw new Error(payload.message || "Inbox upload failed.");
                 }
@@ -627,21 +765,47 @@ function renderLibrary(videos) {
         });
 
         card.querySelector('[data-action="publish"]').addEventListener("click", async () => {
-            setCardStatus(statusEl, "Publishing.");
+            setCardStatus(statusEl, "Publishing to TikTok.");
             try {
-                const response = await fetch("/api/v1/tiktok/publish", {
+                const { response, payload } = await fetchWithCreatorAccess("/api/v1/tiktok/publish", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ task_id: video.task_id }),
                 });
-                const payload = await response.json();
                 if (!response.ok || payload.status >= 400) {
                     throw new Error(payload.message || "Publish failed.");
                 }
-                setCardStatus(statusEl, "Posted.", "good");
+                setCardStatus(statusEl, "Posted to TikTok.", "good");
                 loadLibrary();
             } catch (error) {
                 setCardStatus(statusEl, error.message || "Publish failed.", "error");
+            }
+        });
+
+        card.querySelector('[data-action="publish-facebook"]').addEventListener("click", async () => {
+            setCardStatus(statusEl, "Uploading to Facebook. This can take a few minutes.");
+            const btn = card.querySelector('[data-action="publish-facebook"]');
+            btn.disabled = true;
+            try {
+                const response = await fetch("/api/v1/facebook/publish", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        task_id: video.task_id,
+                        description: caption,
+                        published: true,
+                    }),
+                });
+                const payload = await response.json();
+                if (!response.ok || payload.status >= 400) {
+                    throw new Error(payload.message || "Facebook publish failed.");
+                }
+                setCardStatus(statusEl, "Posted to Facebook.", "good");
+                loadLibrary();
+            } catch (error) {
+                setCardStatus(statusEl, error.message || "Facebook publish failed.", "error");
+            } finally {
+                btn.disabled = false;
             }
         });
 
@@ -652,6 +816,10 @@ function renderLibrary(videos) {
             } catch (error) {
                 setCardStatus(statusEl, "Copy failed.", "error");
             }
+        });
+
+        card.querySelector('[data-action="reveal"]').addEventListener("click", () => {
+            revealVideoFile(video.task_id, statusEl);
         });
 
         card.querySelector('[data-action="delete"]').addEventListener("click", async () => {
@@ -689,6 +857,7 @@ function renderLibrary(videos) {
                 currentTaskId = taskId;
                 els.publishTikTok.style.display = "none";
                 els.uploadInboxTikTok.style.display = "none";
+                els.publishFacebook.style.display = "none";
                 hideManualUpload();
                 els.taskStatus.textContent = `Task ${taskId}`;
                 els.progressBar.style.width = "5%";
@@ -705,12 +874,11 @@ function renderLibrary(videos) {
             setCardStatus(statusEl, "Saving schedule.");
             try {
                 const payloadBody = collectSchedulePayload(card);
-                const response = await fetch(`/api/v1/creator/library/${encodeURIComponent(video.task_id)}/schedule`, {
+                const { response, payload } = await fetchWithCreatorAccess(`/api/v1/creator/library/${encodeURIComponent(video.task_id)}/schedule`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(payloadBody),
                 });
-                const payload = await response.json();
                 if (!response.ok || payload.status >= 400) {
                     throw new Error(payload.message || "Schedule failed.");
                 }
@@ -791,6 +959,11 @@ function queueStatusClass(status) {
 
 function renderQueue(items, processingEnabled) {
     els.queueSummary.textContent = `${items.length} item${items.length === 1 ? "" : "s"} · ${processingEnabled ? "running" : "paused"}`;
+    if (els.clearFinishedQueue) {
+        els.clearFinishedQueue.disabled = !items.some((item) =>
+            ["rendered", "sent", "failed", "canceled"].includes(item.status)
+        );
+    }
     els.queueList.innerHTML = "";
     if (!items.length) {
         els.queueList.innerHTML = '<p class="status-message">No queued stories.</p>';
@@ -820,7 +993,7 @@ function renderQueue(items, processingEnabled) {
                     <button class="ghost-button" type="button" data-action="load-story">Load</button>
                     <button class="ghost-button" type="button" data-action="move-up" ${index === 0 ? "disabled" : ""}>Up</button>
                     <button class="ghost-button" type="button" data-action="move-down" ${index === items.length - 1 ? "disabled" : ""}>Down</button>
-                    ${rendered ? `<a class="ghost-button" href="/tasks/${escapeHtml(item.task_id)}/final-1.mp4" target="_blank" rel="noopener">Video</a>` : ""}
+                    ${rendered ? '<button class="ghost-button" type="button" data-action="reveal-queue">Show in Finder</button>' : ""}
                     ${["queued", "rendering"].includes(status) ? `<button class="ghost-button danger" type="button" data-action="cancel-queue">Cancel</button>` : ""}
                     <button class="ghost-button danger" type="button" data-action="delete-queue">Remove</button>
                 </div>
@@ -868,18 +1041,21 @@ function renderQueue(items, processingEnabled) {
             }
         });
 
+        card.querySelector('[data-action="reveal-queue"]')?.addEventListener("click", () => {
+            revealVideoFile(item.task_id, statusEl);
+        });
+
         const saveSchedule = card.querySelector('[data-action="save-schedule"]');
         if (saveSchedule) {
             saveSchedule.addEventListener("click", async () => {
                 setCardStatus(statusEl, "Saving schedule.");
                 try {
                     const payloadBody = collectSchedulePayload(card);
-                    const response = await fetch(`/api/v1/creator/queue/${encodeURIComponent(item.queue_id)}`, {
+                    const { response, payload } = await fetchWithCreatorAccess(`/api/v1/creator/queue/${encodeURIComponent(item.queue_id)}`, {
                         method: "PATCH",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify(payloadBody),
                     });
-                    const payload = await response.json();
                     if (!response.ok || payload.status >= 400) throw new Error(payload.message || "Schedule failed.");
                     setCardStatus(statusEl, "Schedule saved.", "good");
                     loadQueue();
@@ -984,6 +1160,25 @@ async function setQueueProcessing(enabled) {
         setQueueStatus(error.message || "Queue update failed.", "error");
     } finally {
         button.disabled = false;
+    }
+}
+
+async function clearFinishedQueue() {
+    if (!window.confirm("Clear finished queue items?")) return;
+    els.clearFinishedQueue.disabled = true;
+    try {
+        const response = await fetch("/api/v1/creator/queue/finished", {
+            method: "DELETE",
+        });
+        const payload = await response.json();
+        if (!response.ok || payload.status >= 400) throw new Error(payload.message || "Clear failed.");
+        const deleted = Number(payload.data?.deleted || 0);
+        setQueueStatus(`Cleared ${deleted} finished ${deleted === 1 ? "item" : "items"}.`, "good");
+        loadQueue();
+    } catch (error) {
+        setQueueStatus(error.message || "Clear failed.", "error");
+    } finally {
+        els.clearFinishedQueue.disabled = false;
     }
 }
 
@@ -1096,7 +1291,8 @@ async function generateVideo() {
         setStatus("Add a narration script first.", "error");
         return;
     }
-    if (seconds < MIN_SECONDS) {
+    const minSeconds = minSecondsForLane(story.length_lane);
+    if (seconds < minSeconds) {
         setStatus(`Script is ${seconds}s. Add more story before generating.`, "error");
         return;
     }
@@ -1119,6 +1315,7 @@ async function generateVideo() {
         currentTaskId = taskId;
         els.publishTikTok.style.display = "none";
         els.uploadInboxTikTok.style.display = "none";
+        els.publishFacebook.style.display = "none";
         hideManualUpload();
         setPublishStatus("");
         els.taskStatus.textContent = `Task ${taskId}`;
@@ -1183,6 +1380,7 @@ function pollTask(taskId) {
                 showOutput(task.videos && task.videos[0]);
                 els.publishTikTok.style.display = "block";
                 els.uploadInboxTikTok.style.display = "block";
+                if (facebookConnected) els.publishFacebook.style.display = "block";
                 loadLibrary();
             } else if (task.state === -1) {
                 window.clearInterval(pollTimer);
@@ -1210,8 +1408,7 @@ function showOutput(videoUrl) {
     if (!videoUrl) return;
     els.outputVideo.src = videoUrl;
     els.outputVideo.style.display = "block";
-    els.downloadLink.href = videoUrl;
-    els.downloadLink.style.display = "inline-block";
+    els.downloadLink.style.display = "inline-flex";
     showManualUpload(videoUrl);
 }
 
@@ -1223,6 +1420,7 @@ function setPublishStatus(message, type = "") {
 function setTikTokPill(state, message, href) {
     els.tiktokPill.textContent = message;
     els.tiktokPill.className = `connection-pill ${state}`;
+    els.tiktokPill.dataset.action = state === "locked" ? "unlock" : "";
     if (href) {
         els.tiktokPill.href = href;
         els.tiktokPill.style.pointerEvents = "auto";
@@ -1274,8 +1472,14 @@ function updateTikTokPublishSettings(data) {
 
 async function checkTikTokStatus() {
     try {
-        const response = await fetch("/api/v1/tiktok/status", { cache: "no-store" });
-        const payload = await response.json();
+        const { response, payload } = await fetchWithCreatorAccess(
+            "/api/v1/tiktok/status",
+            { cache: "no-store" },
+            false
+        );
+        if (!response.ok || payload.status >= 400) {
+            throw new Error(payload.message || "status unavailable");
+        }
         const data = payload.data || {};
         if (!data.configured) {
             setTikTokPill("disconnected", "TikTok: not set up", null);
@@ -1283,14 +1487,21 @@ async function checkTikTokStatus() {
             return;
         }
         updateTikTokPublishSettings(data);
+        if (data.locked) {
+            setTikTokPill("locked", "TikTok: unlock", null);
+            return;
+        }
         if (data.connected) {
             setTikTokPill("connected", `TikTok: ${data.nickname || "connected"}`, null);
             return;
         }
         let authUrl = "#";
         try {
-            const authResponse = await fetch("/api/v1/tiktok/auth-url");
-            const authPayload = await authResponse.json();
+            const { response: authResponse, payload: authPayload } =
+                await fetchWithCreatorAccess("/api/v1/tiktok/auth-url");
+            if (!authResponse.ok || authPayload.status >= 400) {
+                throw new Error(authPayload.message || "auth unavailable");
+            }
             authUrl = authPayload?.data?.auth_url || "#";
         } catch (error) {
             authUrl = "#";
@@ -1306,6 +1517,75 @@ function startTikTokMonitor() {
     setTikTokPill("checking", "TikTok: checking", null);
     checkTikTokStatus();
     tiktokTimer = window.setInterval(checkTikTokStatus, 15000);
+}
+
+function setFacebookPill(state, message) {
+    els.facebookPill.textContent = message;
+    els.facebookPill.className = `connection-pill ${state}`;
+}
+
+async function checkFacebookStatus() {
+    try {
+        const response = await fetch("/api/v1/facebook/status", { cache: "no-store" });
+        const payload = await response.json();
+        const data = payload.data || {};
+        facebookConnected = Boolean(data.connected);
+        if (facebookConnected) {
+            const name = data.page_name || "connected";
+            setFacebookPill("connected", `FB: ${name}`);
+        } else {
+            setFacebookPill("disconnected", "FB: not connected");
+        }
+    } catch (error) {
+        facebookConnected = false;
+        setFacebookPill("disconnected", "FB: offline");
+    }
+}
+
+function startFacebookMonitor() {
+    window.clearInterval(facebookTimer);
+    setFacebookPill("checking", "FB: checking");
+    checkFacebookStatus();
+    facebookTimer = window.setInterval(checkFacebookStatus, 30000);
+}
+
+async function publishToFacebook() {
+    if (!currentTaskId) {
+        setPublishStatus("Generate a video first.", "error");
+        return;
+    }
+    const story = collectStory();
+    const description = [
+        story.suggested_description || story.comment_card_title || story.video_subject,
+        (story.suggested_hashtags || []).join(" "),
+    ].filter(Boolean).join(" ");
+
+    els.publishFacebook.disabled = true;
+    els.publishFacebook.textContent = "Uploading to Facebook...";
+    setPublishStatus("Uploading to Facebook. This can take a few minutes for large videos.");
+
+    try {
+        const response = await fetch("/api/v1/facebook/publish", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                task_id: currentTaskId,
+                description: description,
+                published: true,
+            }),
+        });
+        const payload = await response.json();
+        if (!response.ok || payload.status >= 400) {
+            throw new Error(payload.message || "Facebook publish failed.");
+        }
+        setPublishStatus("Posted to Facebook.", "good");
+        loadLibrary();
+    } catch (error) {
+        setPublishStatus(error.message || "Facebook publish failed.", "error");
+    } finally {
+        els.publishFacebook.disabled = false;
+        els.publishFacebook.textContent = "Post to Facebook Page";
+    }
 }
 
 async function publishToTikTok() {
@@ -1333,7 +1613,7 @@ async function publishToTikTok() {
     setPublishStatus("Uploading to TikTok. This can take a minute.");
 
     try {
-        const response = await fetch("/api/v1/tiktok/publish", {
+        const { response, payload } = await fetchWithCreatorAccess("/api/v1/tiktok/publish", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -1349,7 +1629,6 @@ async function publishToTikTok() {
                 is_aigc: els.tiktokAigc.checked,
             }),
         });
-        const payload = await response.json();
         if (!response.ok || payload.status >= 400) {
             throw new Error(payload.message || "Publish failed.");
         }
@@ -1374,12 +1653,11 @@ async function uploadToTikTokInbox() {
     setPublishStatus("Uploading draft to your TikTok inbox. This can take a minute.");
 
     try {
-        const response = await fetch("/api/v1/tiktok/upload-inbox", {
+        const { response, payload } = await fetchWithCreatorAccess("/api/v1/tiktok/upload-inbox", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ task_id: currentTaskId }),
         });
-        const payload = await response.json();
         if (!response.ok || payload.status >= 400) {
             throw new Error(payload.message || "Inbox upload failed.");
         }
@@ -1459,16 +1737,23 @@ function bindEvents() {
         els.queueJsonInput.value = "";
         setQueueStatus("");
     });
+    els.clearFinishedQueue.addEventListener("click", clearFinishedQueue);
     els.startQueue.addEventListener("click", () => setQueueProcessing(true));
     els.pauseQueue.addEventListener("click", () => setQueueProcessing(false));
     els.refreshQueue.addEventListener("click", loadQueue);
     els.refreshLibrary.addEventListener("click", loadLibrary);
     els.cleanupBtn.addEventListener("click", cleanupLibrary);
     els.copyManualCaption.addEventListener("click", copyManualCaption);
+    els.downloadLink.addEventListener("click", () => revealVideoFile(currentTaskId));
+    els.manualRevealFile.addEventListener("click", () => revealVideoFile(currentTaskId));
     els.publishTikTok.addEventListener("click", publishToTikTok);
     els.uploadInboxTikTok.addEventListener("click", uploadToTikTokInbox);
+    els.publishFacebook.addEventListener("click", publishToFacebook);
     els.tiktokPill.addEventListener("click", (event) => {
         if (els.tiktokPill.getAttribute("href") === "#") event.preventDefault();
+        if (els.tiktokPill.dataset.action === "unlock" && promptCreatorAccessKey()) {
+            checkTikTokStatus();
+        }
     });
 }
 
@@ -1478,4 +1763,5 @@ restoreDraft();
 updateAll();
 startConnectionMonitor();
 startTikTokMonitor();
+startFacebookMonitor();
 loadQueue();

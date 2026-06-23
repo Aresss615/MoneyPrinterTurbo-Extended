@@ -170,6 +170,27 @@ class TestCreatorQueueApi(unittest.TestCase):
         self.assertEqual(item["caption_text"], "Draft caption")
         self.assertEqual(item["schedule"]["action"], "draft")
 
+    def test_library_draft_schedule_requires_creator_access_key_when_configured(self):
+        self._seed_video("library-draft-locked")
+
+        with patch(
+            "app.controllers.v1.creator.tiktok.config.app",
+            {"creator_access_key": "owner"},
+        ):
+            response = self.client.post(
+                "/api/v1/creator/library/library-draft-locked/schedule",
+                json={
+                    "caption_text": "Draft caption",
+                    "schedule": {
+                        "run_at_epoch": time.time() + 60,
+                        "action": "draft",
+                        "timezone_label": "Asia/Manila",
+                    },
+                },
+            )
+
+        self.assertEqual(response.status_code, 401)
+
     def test_library_direct_schedule_accepts_consent_privacy_and_connection(self):
         self._seed_video("library-direct")
 
@@ -199,6 +220,33 @@ class TestCreatorQueueApi(unittest.TestCase):
         self.assertEqual(item["status"], "scheduled")
         self.assertEqual(item["schedule"]["action"], "direct")
         self.assertEqual(item["schedule"]["privacy"], "SELF_ONLY")
+
+    def test_library_direct_schedule_requires_creator_access_key_when_configured(self):
+        self._seed_video("library-direct-locked")
+
+        with patch(
+            "app.controllers.v1.creator.tiktok.config.app",
+            {"creator_access_key": "owner"},
+        ), patch(
+            "app.controllers.v1.creator.tiktok.is_configured", return_value=True
+        ), patch(
+            "app.controllers.v1.creator.tiktok.load_token_cache",
+            return_value={"access_token": "token"},
+        ):
+            response = self.client.post(
+                "/api/v1/creator/library/library-direct-locked/schedule",
+                json={
+                    "schedule": {
+                        "run_at_epoch": time.time() + 60,
+                        "action": "direct",
+                        "timezone_label": "UTC",
+                        "privacy": "SELF_ONLY",
+                        "consent_confirmed": True,
+                    },
+                },
+            )
+
+        self.assertEqual(response.status_code, 401)
 
 
     def test_cancel_video_endpoint_requests_task_cancel(self):
@@ -247,6 +295,35 @@ class TestCreatorQueueApi(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+
+    def test_clear_finished_queue_endpoint_removes_only_terminal_items(self):
+        from app.services import creator_queue
+
+        for status in ("queued", "rendered", "sent", "failed", "scheduled"):
+            self.client.post(
+                "/api/v1/creator/queue/import",
+                json={"raw_json": json.dumps(self._story_payload(status.title()))},
+            )
+            item = creator_queue.list_queue_items()[-1]
+            item.status = status
+            if status != "queued":
+                item.task_id = f"{status}-task"
+                Path(utils.task_dir(item.task_id), "final-1.mp4").write_bytes(b"video")
+            creator_queue.save_queue_item(item)
+
+        before_library = self.client.get("/api/v1/creator/library").json()["data"]["videos"]
+        self.assertIn("rendered-task", [video["task_id"] for video in before_library])
+
+        response = self.client.delete("/api/v1/creator/queue/finished")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(data["deleted"], 3)
+        self.assertEqual(data["deleted_statuses"], ["rendered", "sent", "failed"])
+        remaining = self.client.get("/api/v1/creator/queue").json()["data"]["items"]
+        self.assertEqual([item["status"] for item in remaining], ["queued", "scheduled"])
+        after_library = self.client.get("/api/v1/creator/library").json()["data"]["videos"]
+        self.assertEqual([video["task_id"] for video in after_library], ["scheduled-task"])
 
 
 if __name__ == "__main__":

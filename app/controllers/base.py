@@ -1,9 +1,14 @@
 from uuid import uuid4
 
+import hmac
+import os
+
 from fastapi import Request
 
 from app.config import config
 from app.models.exception import HttpException
+
+CREATOR_ACCESS_KEY_HEADER = "x-creator-access-key"
 
 
 def get_task_id(request: Request):
@@ -29,3 +34,36 @@ def verify_token(request: Request):
             status_code=401,
             message=f"invalid token: {request_url}, {user_agent}",
         )
+
+
+def creator_access_key() -> str:
+    return (
+        os.getenv("CREATOR_ACCESS_KEY")
+        or str(config.app.get("creator_access_key", ""))
+    ).strip()
+
+
+def creator_access_key_required() -> bool:
+    return bool(creator_access_key())
+
+
+def has_creator_access(request: Request) -> bool:
+    expected = creator_access_key()
+    if not expected:
+        return True
+    provided = request.headers.get(CREATOR_ACCESS_KEY_HEADER, "")
+    return hmac.compare_digest(provided, expected)
+
+
+def require_creator_access(
+    request: Request,
+    task_id: str | None = None,
+    message: str = "creator access key required",
+) -> None:
+    if has_creator_access(request):
+        return
+    raise HttpException(
+        task_id=task_id or get_task_id(request),
+        status_code=401,
+        message=message,
+    )

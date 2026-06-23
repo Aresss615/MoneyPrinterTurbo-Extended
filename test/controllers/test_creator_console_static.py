@@ -17,7 +17,7 @@ class TestCreatorConsoleStaticAssets(unittest.TestCase):
 
         for element_id in (
             "manualUploadPanel",
-            "manualOpenFile",
+            "manualRevealFile",
             "manualDownloadFile",
             "manualCaption",
             "copyManualCaption",
@@ -26,8 +26,10 @@ class TestCreatorConsoleStaticAssets(unittest.TestCase):
             self.assertIn(element_id, script)
 
         self.assertIn("function showManualUpload", script)
+        self.assertIn("function revealVideoFile", script)
         self.assertIn("function copyManualCaption", script)
         self.assertIn("showManualUpload(videoUrl)", script)
+        self.assertIn("/api/v1/creator/library/", script)
         self.assertIn(".manual-upload-panel", css)
         self.assertIn(".manual-upload-actions", css)
         self.assertIn("white-space: normal", css)
@@ -48,6 +50,30 @@ class TestCreatorConsoleStaticAssets(unittest.TestCase):
         # Queue-card cancel action.
         self.assertIn('data-action="cancel-queue"', script)
         self.assertIn("/cancel", script)
+
+    def test_finished_queue_clear_control_is_wired(self):
+        html = (ROOT_DIR / "resource/public/index.html").read_text(encoding="utf-8")
+        script = (
+            ROOT_DIR / "resource/public/assets/creator-console.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('id="clearFinishedQueue"', html)
+        self.assertIn("clearFinishedQueue: document.querySelector", script)
+        self.assertIn("function clearFinishedQueue", script)
+        self.assertIn("/api/v1/creator/queue/finished", script)
+        self.assertIn("els.clearFinishedQueue.addEventListener", script)
+
+    def test_creator_access_key_is_wired_for_tiktok_requests(self):
+        script = (
+            ROOT_DIR / "resource/public/assets/creator-console.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("CREATOR_ACCESS_KEY_STORAGE", script)
+        self.assertIn("X-Creator-Access-Key", script)
+        self.assertIn("function creatorAccessHeaders", script)
+        self.assertIn("function promptCreatorAccessKey", script)
+        self.assertIn('setTikTokPill("locked", "TikTok: unlock"', script)
+        self.assertIn('dataset.action = state === "locked" ? "unlock"', script)
 
 
 if __name__ == "__main__":

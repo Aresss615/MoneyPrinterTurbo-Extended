@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import threading
 import time
 from json import JSONDecodeError
@@ -30,6 +31,7 @@ QUEUE_STATUSES = {
     "canceled",
 }
 SCHEDULE_ACTIONS = {"draft", "direct"}
+FINISHED_QUEUE_STATUSES = {"rendered", "sent", "failed", "canceled"}
 
 _lock = threading.RLock()
 
@@ -202,6 +204,48 @@ def delete_queue_item(queue_id: str) -> CreatorQueueItem:
         os.remove(queue_item_path(queue_id))
         renumber_queue_positions()
         return item
+
+
+def _task_dir_path(task_id: str) -> str:
+    tasks_root = os.path.realpath(utils.task_dir())
+    task_path = os.path.realpath(os.path.join(tasks_root, task_id))
+    try:
+        if os.path.commonpath([tasks_root, task_path]) != tasks_root:
+            raise ValueError
+    except ValueError:
+        return ""
+    return task_path
+
+
+def _delete_task_artifacts(task_id: str) -> None:
+    if not task_id:
+        return
+    task_path = _task_dir_path(task_id)
+    if task_path:
+        shutil.rmtree(task_path, ignore_errors=True)
+
+
+def clear_finished_queue_items() -> list[CreatorQueueItem]:
+    """Remove terminal queue records while preserving active render/publish work."""
+    with _lock:
+        sync_render_statuses()
+        items = list_queue_items()
+        removed = [item for item in items if item.status in FINISHED_QUEUE_STATUSES]
+        active_task_ids = {
+            item.task_id
+            for item in items
+            if item.status not in FINISHED_QUEUE_STATUSES and item.task_id
+        }
+        for task_id in {item.task_id for item in removed if item.task_id}:
+            if task_id not in active_task_ids:
+                _delete_task_artifacts(task_id)
+        for item in removed:
+            path = queue_item_path(item.queue_id)
+            if os.path.exists(path):
+                os.remove(path)
+        if removed:
+            renumber_queue_positions()
+        return removed
 
 
 def cancel_queue_item(queue_id: str) -> CreatorQueueItem:

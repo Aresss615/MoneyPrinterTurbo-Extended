@@ -78,6 +78,26 @@ def _serve_verification_file(verification_filename: str):
 @router.get("/tiktok/status", summary="Report TikTok connection status")
 def tiktok_status(request: Request):
     configured = tiktok.is_configured()
+    locked = base.creator_access_key_required() and not base.has_creator_access(
+        request
+    )
+    if locked:
+        return utils.get_response(
+            200,
+            {
+                "configured": configured,
+                "connected": False,
+                "locked": True,
+                "requires_access_key": True,
+                "nickname": "",
+                "privacy_level": tiktok.config.tiktok.get(
+                    "privacy_level", tiktok.DEFAULT_PRIVACY
+                ),
+                "creator_info": {},
+                "user_info": {},
+            },
+        )
+
     cache = tiktok.load_token_cache()
     connected = bool(cache.get("access_token"))
     nickname = ""
@@ -100,6 +120,8 @@ def tiktok_status(request: Request):
         {
             "configured": configured,
             "connected": connected,
+            "locked": False,
+            "requires_access_key": base.creator_access_key_required(),
             "nickname": nickname,
             "privacy_level": tiktok.config.tiktok.get(
                 "privacy_level", tiktok.DEFAULT_PRIVACY
@@ -113,6 +135,7 @@ def tiktok_status(request: Request):
 @router.get("/tiktok/auth-url", summary="Get the TikTok authorization URL")
 def tiktok_auth_url(request: Request):
     request_id = base.get_task_id(request)
+    base.require_creator_access(request, task_id=request_id)
     try:
         state = utils.get_uuid()
         url = tiktok.build_authorize_url(state=state)
@@ -179,6 +202,7 @@ def tiktok_privacy_verification_file(request: Request, verification_filename: st
 @router.post("/tiktok/publish", summary="Publish a finished video to TikTok")
 def tiktok_publish(request: Request, body: PublishRequest):
     request_id = base.get_task_id(request)
+    base.require_creator_access(request, task_id=request_id)
     video_path = _final_video_path(body.task_id)
     if not os.path.isfile(video_path):
         raise HttpException(
@@ -229,6 +253,7 @@ def tiktok_upload_inbox(request: Request, body: InboxUploadRequest):
     Uses the video.upload scope; the creator finishes the caption/privacy and
     posts from within the TikTok app.
     """
+    base.require_creator_access(request, task_id=body.task_id)
     video_path = _final_video_path(body.task_id)
     if not os.path.isfile(video_path):
         raise HttpException(

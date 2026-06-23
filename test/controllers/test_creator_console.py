@@ -22,8 +22,12 @@ class TestCreatorConsoleApi(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         data = response.json()["data"]
-        self.assertIn("Browse Reddit", data["prompt"])
-        self.assertIn("170-230 words", data["prompt"])
+        self.assertIn("Reddit", data["prompt"])
+        # Retention-first markers: niche territories, length lanes, verdict CTA.
+        self.assertIn("length_lane", data["prompt"])
+        self.assertIn("comment_prompt", data["prompt"])
+        self.assertIn("NTA or YTA?", data["prompt"])
+        self.assertIn("170-260 words", data["prompt"])
 
     def test_get_status_reports_webserver_and_bot_connection(self):
         response = self.client.get("/api/v1/creator/status")

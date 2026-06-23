@@ -48,6 +48,7 @@ proxy = _cfg.get("proxy", {})
 azure = _cfg.get("azure", {})
 siliconflow = _cfg.get("siliconflow", {})
 tiktok = _cfg.get("tiktok", {})
+facebook = _cfg.get("facebook", {})
 ui = _cfg.get(
     "ui",
     {

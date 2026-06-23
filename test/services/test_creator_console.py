@@ -349,6 +349,114 @@ class TestCreatorConsole(unittest.TestCase):
         self.assertTrue(params.voice_name.endswith("-Female"))
         self.assertEqual(story.narrator_gender, "female")
 
+    def test_normalize_length_lane_defaults_to_story(self):
+        from app.services import creator_console
+
+        self.assertEqual(creator_console.normalize_length_lane("growth"), "growth")
+        self.assertEqual(creator_console.normalize_length_lane("GROWTH"), "growth")
+        self.assertEqual(creator_console.normalize_length_lane("story"), "story")
+        self.assertEqual(creator_console.normalize_length_lane(""), "story")
+        self.assertEqual(creator_console.normalize_length_lane("nonsense"), "story")
+        self.assertEqual(creator_console.normalize_length_lane(None), "story")
+
+    def test_parse_chatgpt_story_json_parses_retention_fields(self):
+        from app.services import creator_console
+
+        raw_json = json.dumps(
+            {
+                "territory": "Family Betrayal",
+                "length_lane": "growth",
+                "comment_card_title": "AITA for keeping the inheritance?",
+                "narration_script": "AITA for keeping the money I was left? " * 20,
+                "comment_prompt": "NTA or YTA?",
+                "suggested_description": "Inheritance drama caption",
+            }
+        )
+
+        story = creator_console.parse_chatgpt_story_json(raw_json)
+
+        self.assertEqual(story.territory, "family betrayal")
+        self.assertEqual(story.length_lane, "growth")
+        self.assertEqual(story.comment_prompt, "NTA or YTA?")
+
+    def test_parse_chatgpt_story_json_defaults_retention_fields(self):
+        from app.services import creator_console
+
+        raw_json = json.dumps(
+            {"narration_script": "AITA for refusing to switch seats? " * 20}
+        )
+
+        story = creator_console.parse_chatgpt_story_json(raw_json)
+
+        self.assertEqual(story.territory, "")
+        self.assertEqual(story.length_lane, "story")
+        self.assertEqual(story.comment_prompt, "")
+
+    def test_parse_chatgpt_story_json_falls_back_caption_to_comment_prompt(self):
+        from app.services import creator_console
+
+        raw_json = json.dumps(
+            {
+                "narration_script": "AITA for keeping the seat? " * 20,
+                "comment_prompt": "Who was actually in the wrong?",
+                "suggested_description": "",
+            }
+        )
+
+        story = creator_console.parse_chatgpt_story_json(raw_json)
+
+        self.assertEqual(story.suggested_description, "Who was actually in the wrong?")
+
+    def test_build_video_params_growth_lane_uses_short_min_duration(self):
+        from app.services import creator_console
+
+        story = creator_console.CreatorStory(
+            narration_script="AITA for refusing to switch seats? " * 20,
+            length_lane="growth",
+        )
+
+        params = creator_console.build_video_params(story, rng=random.Random(7))
+
+        self.assertEqual(params.min_video_duration, creator_console.DEFAULT_MIN_GROWTH)
+
+    def test_build_video_params_story_lane_uses_full_min_duration(self):
+        from app.services import creator_console
+
+        story = creator_console.CreatorStory(
+            narration_script="AITA for refusing to switch seats? " * 30,
+            length_lane="story",
+        )
+
+        params = creator_console.build_video_params(story, rng=random.Random(7))
+
+        self.assertEqual(params.min_video_duration, 60)
+
+    def test_build_video_params_sets_faster_voice_rate(self):
+        from app.services import creator_console
+
+        story = creator_console.CreatorStory(
+            narration_script="AITA for refusing to switch seats? " * 30,
+        )
+
+        params = creator_console.build_video_params(story, rng=random.Random(7))
+
+        self.assertEqual(params.voice_rate, 1.1)
+
+    def test_idea_prompt_targets_three_territories_and_verdict(self):
+        from app.services import creator_console
+
+        prompt = creator_console.CHATGPT_IDEA_PROMPT.lower()
+
+        self.assertIn("length_lane", prompt)
+        self.assertIn("comment_prompt", prompt)
+        self.assertIn("territory", prompt)
+        self.assertIn("nta or yta", prompt)
+        # Niche territories.
+        self.assertIn("inheritance", prompt)
+        self.assertIn("workplace", prompt)
+        # Strict-JSON safeguard retained.
+        self.assertIn("trailing comma", prompt)
+
     def test_publish_marker_round_trips_and_absent_marker_returns_empty(self):
         from app.services import creator_console
         from app.utils import utils
