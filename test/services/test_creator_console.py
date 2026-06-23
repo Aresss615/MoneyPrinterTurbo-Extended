@@ -271,12 +271,23 @@ class TestCreatorConsole(unittest.TestCase):
 
         self.assertTrue(params.voice_name.endswith("-Female"))
 
-    def test_resolve_narrator_gender_prefers_explicit_field(self):
+    def test_resolve_narrator_gender_manual_override_wins(self):
         from app.services import creator_console
 
         story = creator_console.CreatorStory(
             narration_script="My wife and I argued about the dishes. " * 20,
             narrator_gender="female",
+            narrator_gender_override="male",
+        )
+
+        self.assertEqual(creator_console.resolve_narrator_gender(story), "male")
+
+    def test_resolve_narrator_gender_high_confidence_script_overrides_imported_gender(self):
+        from app.services import creator_console
+
+        story = creator_console.CreatorStory(
+            narration_script="I'm a woman and my brother still called me his best man. " * 10,
+            narrator_gender="male",
         )
 
         self.assertEqual(creator_console.resolve_narrator_gender(story), "female")
@@ -314,6 +325,19 @@ class TestCreatorConsole(unittest.TestCase):
 
         self.assertEqual(creator_console.resolve_narrator_gender(woman), "female")
         self.assertEqual(creator_console.resolve_narrator_gender(man), "male")
+
+    def test_resolve_narrator_gender_uses_parent_identity_keywords(self):
+        from app.services import creator_console
+
+        mom = creator_console.CreatorStory(
+            narration_script="I'm a mom and my daughter asked me to pay for the whole wedding. " * 10,
+        )
+        dad = creator_console.CreatorStory(
+            narration_script="As their dad, I refused to bankroll another vacation. " * 10,
+        )
+
+        self.assertEqual(creator_console.resolve_narrator_gender(mom), "female")
+        self.assertEqual(creator_console.resolve_narrator_gender(dad), "male")
 
     def test_resolve_narrator_gender_uses_partner_cue_fallback(self):
         from app.services import creator_console
@@ -486,6 +510,62 @@ class TestCreatorConsole(unittest.TestCase):
         self.assertEqual(marker["status"], "PUBLISH_COMPLETE")
         self.assertEqual(marker["publish_id"], "pub-1")
         self.assertIsInstance(marker["posted_at"], float)
+
+    def test_generated_story_history_scans_task_stories_and_queue_items(self):
+        from app.services import creator_console
+        from app.utils import utils
+
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_root = Path(tmp)
+
+            def storage_dir(sub_dir="", create=False):
+                path = temp_root
+                if sub_dir:
+                    path = path / sub_dir
+                if create:
+                    path.mkdir(parents=True, exist_ok=True)
+                return str(path)
+
+            with patch.object(utils, "storage_dir", side_effect=storage_dir):
+                task_path = Path(utils.task_dir("task-history"))
+                (task_path / "story.json").write_text(
+                    json.dumps(
+                        {
+                            "source_url": "https://www.reddit.com/r/AITA/comments/task/story",
+                            "comment_card_title": "AITA for refusing the loan?",
+                            "narration_script": "I refused the loan after my sister lied. " * 12,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                queue_root = Path(utils.storage_dir("creator_queue", create=True))
+                (queue_root / "queued.json").write_text(
+                    json.dumps(
+                        {
+                            "queue_id": "queued",
+                            "story": {
+                                "source_url": "https://www.reddit.com/r/AITA/comments/queued/story",
+                                "comment_card_title": "AITA for canceling dinner?",
+                                "narration_script": "I canceled dinner after everyone ignored me. " * 12,
+                            },
+                            "caption_text": "",
+                            "status": "queued",
+                            "position": 1,
+                            "created_at": 2,
+                            "updated_at": 2,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                history = creator_console.generated_story_history(limit=10)
+
+        titles = {entry["title"] for entry in history}
+        sources = {entry["source_url"] for entry in history}
+        self.assertIn("AITA for refusing the loan?", titles)
+        self.assertIn("AITA for canceling dinner?", titles)
+        self.assertIn("https://www.reddit.com/r/AITA/comments/task/story", sources)
+        self.assertTrue(all(entry["script_fingerprint"] for entry in history))
 
     def test_list_library_videos_scans_finished_videos_newest_first(self):
         from app.services import creator_console

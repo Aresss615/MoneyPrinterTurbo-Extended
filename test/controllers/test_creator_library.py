@@ -89,6 +89,12 @@ class TestCreatorLibraryApi(unittest.TestCase):
         self.assertEqual([video["task_id"] for video in data["videos"]], ["newer", "older"])
         self.assertEqual(data["videos"][0]["display_name"], "Newer story")
         self.assertEqual(data["videos"][0]["posted"]["method"], "direct")
+        self.assertEqual(
+            data["videos"][0]["publish_status"]["tiktok"]["method"], "direct"
+        )
+        self.assertEqual(data["videos"][0]["publish_status"]["facebook"], {})
+        self.assertEqual(data["videos"][0]["publish_status"]["instagram"], {})
+        self.assertEqual(data["videos"][0]["publish_status"]["youtube"], {})
         self.assertEqual(data["videos"][1]["video_url"], "/tasks/older/final-1.mp4")
 
     def test_delete_library_video_removes_dir_and_rejects_invalid_paths(self):
@@ -156,7 +162,8 @@ class TestCreatorLibraryApi(unittest.TestCase):
         )
         story = json.loads(Path(utils.task_dir("new-task"), "story.json").read_text())
         self.assertEqual(story["comment_card_title"], "Regenerate me")
-        self.assertEqual(story["narrator_gender"], "male")
+        self.assertEqual(story["narrator_gender"], "female")
+        self.assertEqual(story["narrator_gender_override"], "male")
         self.assertTrue(add_task.call_args.kwargs["params"].voice_name.endswith("-Male"))
 
 

@@ -1,4 +1,6 @@
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -11,11 +13,23 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from app.asgi import app
+from app.utils import utils
 
 
 class TestCreatorConsoleApi(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app)
+
+    def _storage_dir_factory(self, root: Path):
+        def storage_dir(sub_dir="", create=False):
+            path = root
+            if sub_dir:
+                path = path / sub_dir
+            if create:
+                path.mkdir(parents=True, exist_ok=True)
+            return str(path)
+
+        return storage_dir
 
     def test_get_idea_prompt_returns_reddit_workflow_prompt(self):
         response = self.client.get("/api/v1/creator/idea-prompt")
@@ -28,6 +42,33 @@ class TestCreatorConsoleApi(unittest.TestCase):
         self.assertIn("comment_prompt", data["prompt"])
         self.assertIn("NTA or YTA?", data["prompt"])
         self.assertIn("170-260 words", data["prompt"])
+
+    def test_get_idea_prompt_injects_recent_story_history(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_root = Path(tmp)
+            with patch.object(
+                utils, "storage_dir", side_effect=self._storage_dir_factory(temp_root)
+            ):
+                task_path = Path(utils.task_dir("used-story"))
+                (task_path / "story.json").write_text(
+                    json.dumps(
+                        {
+                            "source_url": "https://www.reddit.com/r/AITA/comments/used/story",
+                            "comment_card_title": "AITA for refusing the family loan?",
+                            "narration_script": "I refused the family loan after my brother lied. " * 12,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                response = self.client.get("/api/v1/creator/idea-prompt")
+
+        self.assertEqual(response.status_code, 200)
+        prompt = response.json()["data"]["prompt"]
+        self.assertIn("Do not reuse these stories/topics/sources", prompt)
+        self.assertIn("Every new ChatGPT chat is stateless", prompt)
+        self.assertIn("AITA for refusing the family loan?", prompt)
+        self.assertIn("https://www.reddit.com/r/AITA/comments/used/story", prompt)
 
     def test_get_status_reports_webserver_and_bot_connection(self):
         response = self.client.get("/api/v1/creator/status")
@@ -82,6 +123,81 @@ class TestCreatorConsoleApi(unittest.TestCase):
         story = response.json()["data"]["story"]
         self.assertEqual(story["comment_card_title"], "AITA for refusing to hand over wedding photos?")
         self.assertEqual(story["suggested_hashtags"], ["#AITA", "#RedditStories"])
+
+    def test_import_chatgpt_warns_on_duplicate_title_source_and_script(self):
+        script = "I refused the family loan after my brother lied. " * 12
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_root = Path(tmp)
+            with patch.object(
+                utils, "storage_dir", side_effect=self._storage_dir_factory(temp_root)
+            ):
+                task_path = Path(utils.task_dir("used-story"))
+                (task_path / "story.json").write_text(
+                    json.dumps(
+                        {
+                            "source_url": "https://www.reddit.com/r/AITA/comments/used/story",
+                            "comment_card_title": "AITA for refusing the family loan?",
+                            "narration_script": script,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                response = self.client.post(
+                    "/api/v1/creator/import-chatgpt",
+                    json={
+                        "raw_json": json.dumps(
+                            {
+                                "source_url": "https://www.reddit.com/r/AITA/comments/used/story",
+                                "comment_card_title": "AITA for refusing the family loan?",
+                                "narration_script": script,
+                            }
+                        )
+                    },
+                )
+
+        self.assertEqual(response.status_code, 200)
+        warnings = response.json()["data"]["warnings"]
+        self.assertTrue(any("source" in warning.lower() for warning in warnings))
+        self.assertTrue(any("title" in warning.lower() for warning in warnings))
+        self.assertTrue(any("script" in warning.lower() for warning in warnings))
+
+    def test_validate_story_warns_on_duplicate_title_from_queue(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_root = Path(tmp)
+            with patch.object(
+                utils, "storage_dir", side_effect=self._storage_dir_factory(temp_root)
+            ):
+                queue_root = Path(utils.storage_dir("creator_queue", create=True))
+                (queue_root / "queued.json").write_text(
+                    json.dumps(
+                        {
+                            "queue_id": "queued",
+                            "story": {
+                                "comment_card_title": "AITA for canceling dinner?",
+                                "narration_script": "I canceled dinner after everyone ignored me. " * 12,
+                            },
+                            "caption_text": "",
+                            "status": "queued",
+                            "position": 1,
+                            "created_at": 1,
+                            "updated_at": 1,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                response = self.client.post(
+                    "/api/v1/creator/validate",
+                    json={
+                        "comment_card_title": "AITA for canceling dinner?",
+                        "narration_script": "A different script about dinner. " * 40,
+                    },
+                )
+
+        self.assertEqual(response.status_code, 200)
+        warnings = response.json()["data"]["warnings"]
+        self.assertTrue(any("title" in warning.lower() for warning in warnings))
 
     def test_import_chatgpt_invalid_json_returns_400(self):
         response = self.client.post(

@@ -31,6 +31,7 @@ class LibraryCleanupRequest(BaseModel):
 
 class LibraryRegenerateRequest(BaseModel):
     narrator_gender: str = ""
+    narrator_gender_override: str = ""
 
 
 class QueueImportRequest(BaseModel):
@@ -63,6 +64,7 @@ def build_validation_response(story: creator_console.CreatorStory):
         "minimum_seconds": creator_console.DEFAULT_MIN_VIDEO_DURATION,
         "meets_minimum_duration": estimated_seconds
         >= creator_console.DEFAULT_MIN_VIDEO_DURATION,
+        "warnings": creator_console.duplicate_story_warnings(story),
     }
 
 
@@ -202,7 +204,7 @@ def get_idea_prompt(request: Request):
     return utils.get_response(
         200,
         {
-            "prompt": creator_console.CHATGPT_IDEA_PROMPT,
+            "prompt": creator_console.build_chatgpt_idea_prompt(),
             "minimum_seconds": creator_console.DEFAULT_MIN_VIDEO_DURATION,
             "target_words": "170-260",
         },
@@ -426,8 +428,12 @@ def regenerate_creator_library_video(
 ):
     try:
         story = _load_library_story(task_id)
-        if "narrator_gender" in body.model_fields_set:
-            story.narrator_gender = creator_console.normalize_narrator_gender(
+        if "narrator_gender_override" in body.model_fields_set:
+            story.narrator_gender_override = creator_console.normalize_narrator_gender(
+                body.narrator_gender_override
+            )
+        elif "narrator_gender" in body.model_fields_set:
+            story.narrator_gender_override = creator_console.normalize_narrator_gender(
                 body.narrator_gender
             )
         # TTS timing drives caption sync, so regenerate re-renders the full video

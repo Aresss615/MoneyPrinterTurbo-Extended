@@ -75,6 +75,24 @@ class TestCreatorConsoleStaticAssets(unittest.TestCase):
         self.assertIn('setTikTokPill("locked", "TikTok: unlock"', script)
         self.assertIn('dataset.action = state === "locked" ? "unlock"', script)
 
+    def test_narrator_gender_override_is_separate_from_detected_metadata(self):
+        script = (
+            ROOT_DIR / "resource/public/assets/creator-console.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("currentNarratorGender", script)
+        self.assertIn("narrator_gender: currentNarratorGender", script)
+        self.assertIn("narrator_gender_override: els.narratorGender.value", script)
+        self.assertIn("story.narrator_gender_override || \"\"", script)
+
+    def test_library_uses_platform_publish_status_map(self):
+        script = (
+            ROOT_DIR / "resource/public/assets/creator-console.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("video.publish_status", script)
+        self.assertIn("platformStatusLabel", script)
+
 
 if __name__ == "__main__":
     unittest.main()

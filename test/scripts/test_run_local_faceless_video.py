@@ -36,6 +36,23 @@ class TestRunLocalFacelessVideo(unittest.TestCase):
         discovered = {str(p) for p in creator_console.list_background_sources()}
         self.assertIn(params.video_materials[0].url, discovered)
 
+    def test_build_video_params_matches_voice_to_story_narrator_gender(self):
+        import random as random_module
+
+        from scripts import run_local_faceless_video as runner
+
+        female = runner.build_video_params(
+            "I'm a woman and my husband still expected me to host dinner. " * 10,
+            rng=random_module.Random(1),
+        )
+        male = runner.build_video_params(
+            "As a man, I told my wife I would not lie for her family. " * 10,
+            rng=random_module.Random(3),
+        )
+
+        self.assertTrue(female.voice_name.endswith("-Female"))
+        self.assertTrue(male.voice_name.endswith("-Male"))
+
     def test_build_video_params_enables_reddit_card_and_center_captions(self):
         from scripts import run_local_faceless_video as runner
 

@@ -44,6 +44,13 @@ def build_video_params(
     if not story:
         raise ValueError("story must not be empty")
 
+    creator_story = creator_console.CreatorStory(
+        narration_script=story,
+        comment_card_username=card_username,
+        comment_card_title=derive_card_title(story),
+    )
+    narrator_gender = creator_console.resolve_narrator_gender(creator_story)
+
     return VideoParams(
         video_subject="AITA story",
         video_script=story,
@@ -56,7 +63,7 @@ def build_video_params(
         video_source="local",
         video_materials=[creator_console.pick_background_material(rng)],
         video_language="en",
-        voice_name=creator_console.pick_voice(rng),
+        voice_name=creator_console.pick_voice(rng, gender=narrator_gender),
         voice_volume=1.0,
         voice_rate=1.0,
         bgm_type="",

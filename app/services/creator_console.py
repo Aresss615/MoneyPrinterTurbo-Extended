@@ -1,3 +1,4 @@
+import hashlib
 import json
 import math
 import os
@@ -27,6 +28,9 @@ CAPTION_FONT = "Montserrat-ExtraBold.ttf"
 CAPTION_FONT_SIZE = 64
 CAPTION_STROKE_WIDTH = 3
 SHORT_FORM_WORDS_PER_MINUTE = 165
+PUBLISH_PLATFORMS = ("tiktok", "facebook", "instagram", "youtube")
+DEFAULT_STORY_HISTORY_LIMIT = 12
+STORY_FINGERPRINT_WORDS = 48
 # Slightly faster than a default read for momentum, the pace a faceless
 # Reddit-story clip wants (faster than conversation, slower than synthetic
 # overload). Applied via edge-tts in voice.azure_tts_v1.
@@ -98,19 +102,19 @@ _SELF_TAG_RE = re.compile(
 _DIRECT_FEMALE_RE = [
     re.compile(p, re.IGNORECASE)
     for p in (
-        r"\bas a woman\b",
-        r"\bi'?m a (?:girl|woman)\b",
-        r"\bi am a (?:girl|woman)\b",
-        r"\bbeing a (?:mom|mother)\b",
+        r"\bas (?:a |their |his |her |the )?(?:girl|woman|female|mom|mother)\b",
+        r"\bi(?:'|’)?m a (?:girl|woman|female|mom|mother)\b",
+        r"\bi am a (?:girl|woman|female|mom|mother)\b",
+        r"\bbeing (?:a |their |his |her |the )?(?:mom|mother)\b",
     )
 ]
 _DIRECT_MALE_RE = [
     re.compile(p, re.IGNORECASE)
     for p in (
-        r"\bas a man\b",
-        r"\bi'?m a (?:guy|man)\b",
-        r"\bi am a (?:guy|man)\b",
-        r"\bbeing a (?:dad|father)\b",
+        r"\bas (?:a |their |his |her |the )?(?:guy|man|male|dad|father)\b",
+        r"\bi(?:'|’)?m a (?:guy|man|male|dad|father)\b",
+        r"\bi am a (?:guy|man|male|dad|father)\b",
+        r"\bbeing (?:a |their |his |her |the )?(?:dad|father)\b",
     )
 ]
 # Partner cues assume a heterosexual relationship — lowest-weight fallback only.
@@ -131,21 +135,7 @@ def _self_tag_gender(text: str) -> str:
     return "female" if sex == "f" else "male" if sex == "m" else ""
 
 
-def resolve_narrator_gender(story: "CreatorStory") -> str:
-    """Best-effort narrator gender for voice selection.
-
-    Resolution order: the explicit ``narrator_gender`` field, then Reddit
-    self-tags (e.g. ``28F``), then weighted keyword voting over the script.
-    Returns ``"male"``/``"female"`` or ``""`` when there is no usable signal.
-    """
-    explicit = normalize_narrator_gender(getattr(story, "narrator_gender", ""))
-    if explicit in ("male", "female"):
-        return explicit
-
-    title = getattr(story, "comment_card_title", "") or ""
-    script = getattr(story, "narration_script", "") or ""
-    text = f"{title}\n{script}"
-
+def _local_narrator_gender(text: str) -> str:
     tag = _self_tag_gender(text)
     if tag:
         return tag
@@ -158,6 +148,35 @@ def resolve_narrator_gender(story: "CreatorStory") -> str:
         return "female"
     if male > female:
         return "male"
+    return ""
+
+
+def detect_narrator_gender(story: "CreatorStory") -> str:
+    title = getattr(story, "comment_card_title", "") or ""
+    script = getattr(story, "narration_script", "") or ""
+    return _local_narrator_gender(f"{title}\n{script}")
+
+
+def resolve_narrator_gender(story: "CreatorStory") -> str:
+    """Best-effort narrator gender for voice selection.
+
+    Resolution order: manual override, high-confidence local story cues,
+    imported/detected story metadata, then unknown. Returns ``"male"``/
+    ``"female"`` or ``""`` when there is no usable signal.
+    """
+    override = normalize_narrator_gender(
+        getattr(story, "narrator_gender_override", "")
+    )
+    if override:
+        return override
+
+    detected = detect_narrator_gender(story)
+    if detected:
+        return detected
+
+    imported = normalize_narrator_gender(getattr(story, "narrator_gender", ""))
+    if imported:
+        return imported
     return ""
 
 
@@ -262,7 +281,10 @@ class CreatorStory(BaseModel):
     suggested_description: str = ""
     suggested_hashtags: list[str] = Field(default_factory=list)
     content_notes: str = ""
+    # Imported/detected narrator metadata. Manual selection lives in
+    # narrator_gender_override so Auto does not erase this value.
     narrator_gender: str = ""
+    narrator_gender_override: str = ""
 
 
 def normalize_length_lane(value: Any) -> str:
@@ -359,6 +381,9 @@ def story_from_mapping(payload: dict[str, Any]) -> CreatorStory:
         suggested_hashtags=normalize_hashtags(payload.get("suggested_hashtags") or []),
         content_notes=clean_text(payload.get("content_notes") or ""),
         narrator_gender=normalize_narrator_gender(payload.get("narrator_gender") or ""),
+        narrator_gender_override=normalize_narrator_gender(
+            payload.get("narrator_gender_override") or ""
+        ),
     )
 
 
@@ -368,9 +393,15 @@ def build_video_params(story: CreatorStory, rng=random) -> VideoParams:
         raise ValueError("narration_script must not be empty")
 
     title = story.comment_card_title or derive_card_title(script)
+    detected_gender = detect_narrator_gender(story)
+    if detected_gender:
+        story.narrator_gender = detected_gender
+    else:
+        story.narrator_gender = normalize_narrator_gender(story.narrator_gender)
+    story.narrator_gender_override = normalize_narrator_gender(
+        story.narrator_gender_override
+    )
     gender = resolve_narrator_gender(story)
-    # Persist the resolved gender so the dumped story.json is debuggable next time.
-    story.narrator_gender = gender
     voice_name = pick_voice(rng, gender=gender)
     lane = normalize_length_lane(story.length_lane)
     min_duration = DEFAULT_MIN_GROWTH if lane == "growth" else DEFAULT_MIN_VIDEO_DURATION
@@ -600,6 +631,151 @@ def normalize_narrator_gender(value: Any) -> str:
     return gender if gender in ("male", "female") else ""
 
 
+def _canonical_url(value: str) -> str:
+    return clean_text(value).rstrip("/").lower()
+
+
+def _canonical_title(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", clean_text(value).lower()).strip()
+
+
+def script_fingerprint(script: str) -> str:
+    tokens = re.findall(r"[a-z0-9']+", (script or "").lower())
+    if not tokens:
+        return ""
+    basis = " ".join(tokens[:STORY_FINGERPRINT_WORDS])
+    return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:12]
+
+
+def _history_entry_from_story(
+    story: dict[str, Any], *, created_at: float, origin: str
+) -> dict[str, Any] | None:
+    if not isinstance(story, dict):
+        return None
+    title = clean_text(
+        story.get("comment_card_title")
+        or story.get("original_title")
+        or story.get("video_subject")
+        or ""
+    )
+    source_url = clean_text(story.get("source_url") or "")
+    script = clean_text(story.get("narration_script") or story.get("video_script") or "")
+    fingerprint = script_fingerprint(script)
+    if not title and not source_url and not fingerprint:
+        return None
+    return {
+        "title": title,
+        "source_url": source_url,
+        "script_fingerprint": fingerprint,
+        "script_excerpt": truncate_text(script, 140),
+        "created_at": created_at,
+        "origin": origin,
+    }
+
+
+def _read_json_file(path: Path) -> Any:
+    with open(path, "r", encoding="utf-8") as fp:
+        return json.load(fp)
+
+
+def generated_story_history(limit: int = DEFAULT_STORY_HISTORY_LIMIT) -> list[dict]:
+    """Return recent generated/imported story fingerprints from tasks and queue."""
+    entries: list[dict] = []
+
+    tasks_root = Path(utils.task_dir())
+    for story_path in tasks_root.glob("*/story.json"):
+        try:
+            story = _read_json_file(story_path)
+            entry = _history_entry_from_story(
+                story,
+                created_at=story_path.stat().st_mtime,
+                origin=f"task:{story_path.parent.name}",
+            )
+        except (OSError, ValueError, TypeError) as exc:
+            logger.warning(f"failed to read story history item {story_path}: {exc}")
+            continue
+        if entry:
+            entries.append(entry)
+
+    queue_root = Path(utils.storage_dir("creator_queue"))
+    if queue_root.exists():
+        for item_path in queue_root.glob("*.json"):
+            if item_path.name == "state.json":
+                continue
+            try:
+                item = _read_json_file(item_path)
+                story = item.get("story", item) if isinstance(item, dict) else {}
+                created_at = float(
+                    item.get("updated_at") or item.get("created_at") or item_path.stat().st_mtime
+                )
+                entry = _history_entry_from_story(
+                    story, created_at=created_at, origin=f"queue:{item_path.stem}"
+                )
+            except (OSError, ValueError, TypeError) as exc:
+                logger.warning(f"failed to read queue history item {item_path}: {exc}")
+                continue
+            if entry:
+                entries.append(entry)
+
+    deduped: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    for entry in sorted(entries, key=lambda item: item["created_at"], reverse=True):
+        key = (
+            _canonical_title(entry.get("title", "")),
+            _canonical_url(entry.get("source_url", "")),
+            entry.get("script_fingerprint", ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(entry)
+        if len(deduped) >= max(1, limit):
+            break
+    return deduped
+
+
+def duplicate_story_warnings(story: CreatorStory) -> list[str]:
+    warnings: list[str] = []
+    source_url = _canonical_url(story.source_url)
+    title = _canonical_title(story.comment_card_title or story.original_title)
+    fingerprint = script_fingerprint(story.narration_script)
+
+    for entry in generated_story_history(limit=50):
+        entry_title = _canonical_title(entry.get("title", ""))
+        entry_url = _canonical_url(entry.get("source_url", ""))
+        entry_fingerprint = entry.get("script_fingerprint", "")
+        label = entry.get("title") or entry.get("source_url") or entry.get("origin", "story")
+        if source_url and source_url == entry_url:
+            warnings.append(f"Possible duplicate source URL: {label}")
+        if title and title == entry_title:
+            warnings.append(f"Possible duplicate title: {label}")
+        if fingerprint and fingerprint == entry_fingerprint:
+            warnings.append(f"Possible duplicate script fingerprint: {label}")
+    return list(dict.fromkeys(warnings))
+
+
+def build_chatgpt_idea_prompt(limit: int = DEFAULT_STORY_HISTORY_LIMIT) -> str:
+    history = generated_story_history(limit=limit)
+    lines = [
+        "Do not reuse these stories/topics/sources:",
+        "- Every new ChatGPT chat is stateless: treat this section as the only memory of what has already been generated.",
+        "- Avoid the listed titles, source URLs, script fingerprints, and substantially similar themes.",
+    ]
+    if history:
+        for entry in history:
+            title = entry.get("title") or "Untitled story"
+            source = entry.get("source_url") or "source blank"
+            fingerprint = entry.get("script_fingerprint") or "no-script"
+            excerpt = entry.get("script_excerpt") or ""
+            lines.append(
+                f"- {title} | {source} | script:{fingerprint}"
+                + (f" | {excerpt}" if excerpt else "")
+            )
+    else:
+        lines.append("- No recent local stories found, but still avoid repeating obvious Reddit classics.")
+    return f"{CHATGPT_IDEA_PROMPT}\n\n" + "\n".join(lines)
+
+
 def publish_marker_path(task_id: str) -> str:
     return os.path.join(utils.task_dir(task_id), "publish.json")
 
@@ -653,6 +829,13 @@ def load_facebook_publish_marker(task_id: str) -> dict:
         return {}
 
 
+def platform_publish_status(task_id: str) -> dict[str, dict]:
+    status = {platform: {} for platform in PUBLISH_PLATFORMS}
+    status["tiktok"] = load_publish_marker(task_id)
+    status["facebook"] = load_facebook_publish_marker(task_id)
+    return status
+
+
 def reveal_path_in_file_manager(path: str) -> None:
     """Ask the local OS to reveal a generated file in its file manager."""
     target = Path(path).resolve()
@@ -704,6 +887,7 @@ def list_library_videos() -> list[dict]:
                 "size_bytes": os.path.getsize(video_path),
                 "posted": marker,
                 "facebook_posted": fb_marker,
+                "publish_status": platform_publish_status(task_id),
                 "suggested_description": story.get("suggested_description", ""),
                 "suggested_hashtags": story.get("suggested_hashtags", []),
             }

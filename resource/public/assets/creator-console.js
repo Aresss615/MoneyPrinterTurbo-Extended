@@ -164,6 +164,7 @@ let currentSuggestedDescription = "";
 let currentLengthLane = "story";
 let currentCommentPrompt = "";
 let currentTerritory = "";
+let currentNarratorGender = "";
 
 function minSecondsForLane(lane) {
     return lane === "growth" ? GROWTH_MIN_SECONDS : MIN_SECONDS;
@@ -259,7 +260,8 @@ function collectStory() {
         suggested_description: currentSuggestedDescription,
         suggested_hashtags: hashtagsFromInput(els.hashtags.value),
         content_notes: cleanText(els.contentNotes.value),
-        narrator_gender: els.narratorGender.value,
+        narrator_gender: currentNarratorGender,
+        narrator_gender_override: els.narratorGender.value,
     };
 }
 
@@ -274,7 +276,10 @@ function fillFromStory(story) {
     els.subreddit.value = cleanText(story.subreddit);
     els.hashtags.value = (story.suggested_hashtags || []).join(", ");
     els.contentNotes.value = cleanText(story.content_notes);
-    els.narratorGender.value = story.narrator_gender || "";
+    currentNarratorGender = ["male", "female"].includes(cleanText(story.narrator_gender).toLowerCase())
+        ? cleanText(story.narrator_gender).toLowerCase()
+        : "";
+    els.narratorGender.value = story.narrator_gender_override || "";
     currentSuggestedDescription = cleanText(story.suggested_description);
     currentLengthLane = (cleanText(story.length_lane).toLowerCase() === "growth") ? "growth" : "story";
     currentCommentPrompt = cleanText(story.comment_prompt);
@@ -430,6 +435,22 @@ function relativeTime(epochSeconds) {
         if (count >= 1) return `${count} ${label}${count === 1 ? "" : "s"} ago`;
     }
     return "just now";
+}
+
+function platformStatusLabel(platform, status) {
+    if (!status || !Object.keys(status).length) {
+        return platform === "tiktok" ? "Not posted" : null;
+    }
+    const age = status.posted_at ? ` ${relativeTime(status.posted_at)}` : "";
+    if (platform === "tiktok") {
+        if (status.method === "inbox") return `TT draft${age}`;
+        if (status.method === "direct") return `TT posted${age}`;
+        return `TT sent${age}`;
+    }
+    if (platform === "facebook") return `FB posted${age}`;
+    if (platform === "instagram") return `IG posted${age}`;
+    if (platform === "youtube") return `YT posted${age}`;
+    return `Sent${age}`;
 }
 
 function libraryStatusLabel(posted) {
@@ -701,9 +722,12 @@ function renderLibrary(videos) {
         const title = escapeHtml(video.display_name || video.task_id);
         const created = relativeTime(video.created_at);
         const size = humanBytes(video.size_bytes);
-        const statusLabel = escapeHtml(libraryStatusLabel(video.posted));
-        const statusClass = video.posted && Object.keys(video.posted).length ? "posted" : "pending";
-        const fbLabel = facebookStatusLabel(video.facebook_posted);
+        const publishStatus = video.publish_status || {};
+        const tiktokStatus = publishStatus.tiktok || video.posted || {};
+        const facebookStatus = publishStatus.facebook || video.facebook_posted || {};
+        const statusLabel = escapeHtml(platformStatusLabel("tiktok", tiktokStatus) || libraryStatusLabel(video.posted));
+        const statusClass = tiktokStatus && Object.keys(tiktokStatus).length ? "posted" : "pending";
+        const fbLabel = platformStatusLabel("facebook", facebookStatus) || facebookStatusLabel(video.facebook_posted);
         const fbBadge = fbLabel ? `<span class="library-badge fb-badge">${escapeHtml(fbLabel)}</span>` : "";
         const activeSchedule = latestActiveSchedule(video);
         const scheduleBadge = activeSchedule
