@@ -4,43 +4,111 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>JC Video Factory</title>
+<meta name="description" content="JC Video Factory is a personal tool for generating short-form videos and publishing them to the owner's own connected social accounts, including TikTok.">
 <style>
-  :root { --accent: #c8102e; --ink: #1a1a1a; --muted: #666; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-         max-width: 40rem; margin: 4rem auto; padding: 0 1.25rem; line-height: 1.6;
-         color: var(--ink); }
-  h1 { margin-bottom: 0.25rem; }
+  :root {
+    --accent: #c8102e;
+    --ink: #1a1a1a;
+    --muted: #666;
+    --line: #e7e7e7;
+    --card: #fafafa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    max-width: 44rem; margin: 0 auto; padding: 3.5rem 1.25rem 4rem;
+    line-height: 1.6; color: var(--ink);
+  }
   a { color: var(--accent); }
-  ul { padding-left: 1.2rem; }
-  .status { display: inline-flex; align-items: center; gap: 0.5rem; margin: 1rem 0;
-            padding: 0.4rem 0.8rem; border: 1px solid #e3e3e3; border-radius: 999px;
-            font-size: 0.9rem; background: #fafafa; }
+  header { border-bottom: 1px solid var(--line); padding-bottom: 1.5rem; margin-bottom: 2rem; }
+  h1 { margin: 0 0 0.25rem; font-size: 1.9rem; letter-spacing: -0.02em; }
+  .tagline { margin: 0; color: var(--muted); font-size: 1.05rem; }
+  h2 { font-size: 1.15rem; margin: 2.5rem 0 0.75rem; letter-spacing: -0.01em; }
+  p { margin: 0.75rem 0; }
+  .lead { font-size: 1.05rem; }
+
+  .status {
+    display: inline-flex; align-items: center; gap: 0.5rem; margin: 1.25rem 0 0.25rem;
+    padding: 0.4rem 0.85rem; border: 1px solid var(--line); border-radius: 999px;
+    font-size: 0.9rem; background: var(--card);
+  }
   .dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: #bbb; }
   .status.online .dot { background: #1aa251; }
   .status.offline .dot { background: #b33; }
-  footer { margin-top: 2.5rem; font-size: 0.9rem; color: var(--muted); }
+  .note { font-size: 0.9rem; color: var(--muted); margin-top: 0.35rem; }
+
+  .features { list-style: none; padding: 0; margin: 0.75rem 0;
+    display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+  .features li {
+    border: 1px solid var(--line); border-radius: 0.6rem; padding: 0.9rem 1rem;
+    background: var(--card);
+  }
+  .features b { display: block; margin-bottom: 0.2rem; }
+  .features span { color: var(--muted); font-size: 0.92rem; }
+
+  ol.steps { padding-left: 1.2rem; margin: 0.75rem 0; }
+  ol.steps li { margin: 0.45rem 0; }
+
+  ul.docs { padding-left: 1.2rem; }
+  ul.docs li { margin: 0.3rem 0; }
+
+  footer {
+    margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line);
+    font-size: 0.9rem; color: var(--muted);
+  }
 </style>
 </head>
 <body>
-  <h1>JC Video Factory</h1>
-  <p>JC Video Factory is a personal tool that helps create and publish short-form
-     videos. It lets the account owner generate a video and send it to their own
-     connected social accounts (including TikTok) for posting.</p>
+  <header>
+    <h1>JC Video Factory</h1>
+    <p class="tagline">A personal tool for creating short-form videos and publishing them to your own connected accounts.</p>
+  </header>
+
+  <p class="lead">JC Video Factory is a single-owner application that helps its owner generate
+     short-form videos and post them to their own connected social accounts — including
+     TikTok. The owner writes or selects a story, the tool produces a finished vertical
+     video, and the owner reviews it before choosing to publish to an account they control.
+     It is not a multi-user service and does not post on behalf of anyone but the owner.</p>
 
   <div id="bot-status" class="status" role="status" aria-live="polite">
     <span class="dot"></span><span class="label">Checking creator service…</span>
   </div>
-  <p id="bot-status-note" style="font-size:0.9rem;color:var(--muted);margin-top:0;">
-    The creator/publishing service runs on the owner's machine and is only online
-    when they are creating. The pages below are always available.</p>
+  <p id="bot-status-note" class="note">
+    The creator/publishing service runs on the owner's machine and is only online when
+    they are actively creating. These pages stay available regardless.</p>
 
-  <p>Legal documents:</p>
-  <ul>
+  <h2>What it does</h2>
+  <ul class="features">
+    <li><b>Script &amp; narration</b><span>Generates a story script and a TTS voiceover locally.</span></li>
+    <li><b>Word-by-word captions</b><span>Subtitles highlight in sync with the narration.</span></li>
+    <li><b>Relevant b-roll</b><span>Matches background footage to the script rather than picking at random.</span></li>
+    <li><b>Owner-controlled publishing</b><span>Sends the finished video to the owner's own connected TikTok account.</span></li>
+  </ul>
+
+  <h2>How it works</h2>
+  <ol class="steps">
+    <li>The owner provides a story or idea on their own machine.</li>
+    <li>The tool assembles a vertical video: voiceover, captions, and matched background.</li>
+    <li>The owner previews the result and edits the caption, hashtags, and privacy as desired.</li>
+    <li>The owner clicks publish to send the video to their <em>own</em> connected account.</li>
+  </ol>
+
+  <h2>How it uses TikTok</h2>
+  <p>JC Video Factory uses TikTok's Content Posting API solely so the owner can publish
+     their own generated videos to their own TikTok account. The owner authorizes the
+     connection once via TikTok Login, and only the <code>video.upload</code> and
+     <code>video.publish</code> scopes are requested. The tool never reads other users'
+     content and never posts to accounts other than the owner's connected account. Until
+     the app is approved by TikTok, posts are created as private (visible only to the
+     owner).</p>
+
+  <h2>Legal</h2>
+  <ul class="docs">
     <li><a href="/legal/terms">Terms of Service</a></li>
     <li><a href="/legal/privacy">Privacy Policy</a></li>
   </ul>
 
-  <footer>Contact: johnchrisley4@gmail.com</footer>
+  <footer>Contact: <a href="mailto:johnchrisley4@gmail.com">johnchrisley4@gmail.com</a></footer>
 
 <script>
   (function () {

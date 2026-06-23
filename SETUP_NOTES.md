@@ -76,10 +76,17 @@ Manually publish a finished video to TikTok from the creator console
 One-time setup:
 
 1. Register an app at https://developers.tiktok.com.
-2. Publish the repo's simple legal pages with GitHub Pages and use their HTTPS
+2. Publish the repo's simple legal pages with GitHub Pages and use these HTTPS
    URLs in the TikTok form:
-   - `docs/tiktok-terms.md`
-   - `docs/tiktok-privacy.md`
+   - Website URL / Web/Desktop URL: `https://johnchrisley.dev/legal`
+   - Terms of Service URL: `https://johnchrisley.dev/legal/terms`
+   - Privacy Policy URL: `https://johnchrisley.dev/legal/privacy`
+
+   > ⚠️ Never put `https://app.johnchrisley.dev` in any of the three website
+   > fields above. That host is the creator console + OAuth callback and is only
+   > online when the bot is running — submitting it as the Website URL caused the
+   > "Invalid Website URL" rejection (reviewer crawled it while the Mac was
+   > offline). `app.` belongs only in the Login Kit redirect URI below.
 3. Add the **Content Posting API** product and request only these scopes:
    `video.publish` + `video.upload`.
 4. Start the creator app locally:
@@ -91,15 +98,16 @@ One-time setup:
    cloudflared tunnel --url http://127.0.0.1:8080
    ```
    Copy the generated `https://...trycloudflare.com` URL.
-6. In TikTok Login Kit settings, set a redirect URI that exactly matches:
-   `https://<your-cloudflare-url>/api/v1/tiktok/callback`.
+6. In TikTok Login Kit settings, set a redirect URI that exactly matches the
+   public app callback, currently:
+   `https://app.johnchrisley.dev/api/v1/callback`.
 7. Copy the app's **client key** and **client secret** into `config.toml`:
 
    ```toml
    [tiktok]
    client_key = "..."
    client_secret = "..."
-   redirect_uri = "https://<your-cloudflare-url>/api/v1/tiktok/callback"
+   redirect_uri = "https://app.johnchrisley.dev/api/v1/callback"
    privacy_level = "SELF_ONLY"   # PUBLIC_TO_EVERYONE after TikTok audits your app
    disable_comment = false
    disable_duet = false
