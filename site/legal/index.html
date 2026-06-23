@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JC Video Factory</title>
+<style>
+  :root { --accent: #c8102e; --ink: #1a1a1a; --muted: #666; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+         max-width: 40rem; margin: 4rem auto; padding: 0 1.25rem; line-height: 1.6;
+         color: var(--ink); }
+  h1 { margin-bottom: 0.25rem; }
+  a { color: var(--accent); }
+  ul { padding-left: 1.2rem; }
+  .status { display: inline-flex; align-items: center; gap: 0.5rem; margin: 1rem 0;
+            padding: 0.4rem 0.8rem; border: 1px solid #e3e3e3; border-radius: 999px;
+            font-size: 0.9rem; background: #fafafa; }
+  .dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: #bbb; }
+  .status.online .dot { background: #1aa251; }
+  .status.offline .dot { background: #b33; }
+  footer { margin-top: 2.5rem; font-size: 0.9rem; color: var(--muted); }
+</style>
+</head>
+<body>
+  <h1>JC Video Factory</h1>
+  <p>JC Video Factory is a personal tool that helps create and publish short-form
+     videos. It lets the account owner generate a video and send it to their own
+     connected social accounts (including TikTok) for posting.</p>
+
+  <div id="bot-status" class="status" role="status" aria-live="polite">
+    <span class="dot"></span><span class="label">Checking creator service…</span>
+  </div>
+  <p id="bot-status-note" style="font-size:0.9rem;color:var(--muted);margin-top:0;">
+    The creator/publishing service runs on the owner's machine and is only online
+    when they are creating. The pages below are always available.</p>
+
+  <p>Legal documents:</p>
+  <ul>
+    <li><a href="/legal/terms">Terms of Service</a></li>
+    <li><a href="/legal/privacy">Privacy Policy</a></li>
+  </ul>
+
+  <footer>Contact: johnchrisley4@gmail.com</footer>
+
+<script>
+  (function () {
+    var box = document.getElementById('bot-status');
+    var label = box.querySelector('.label');
+    var HEALTH_URL = 'https://app.johnchrisley.dev/health';
+
+    function set(state, text) {
+      box.classList.remove('online', 'offline');
+      box.classList.add(state);
+      label.textContent = text;
+    }
+
+    var controller = new AbortController();
+    var timer = setTimeout(function () { controller.abort(); }, 4000);
+
+    fetch(HEALTH_URL, { signal: controller.signal, cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+      .then(function (d) {
+        if (d && d.status === 'ok') { set('online', 'Creator service: online'); }
+        else { set('offline', 'Creator service: offline'); }
+      })
+      .catch(function () { set('offline', 'Creator service: offline'); })
+      .finally(function () { clearTimeout(timer); });
+  })();
+</script>
+</body>
+</html>

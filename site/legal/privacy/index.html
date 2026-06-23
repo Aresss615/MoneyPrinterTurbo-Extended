@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JC Video Factory — Privacy Policy</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+         max-width: 42rem; margin: 4rem auto; padding: 0 1.25rem; line-height: 1.6; color: #1a1a1a; }
+  h1 { margin-bottom: 0.25rem; }
+  h2 { margin-top: 1.8rem; font-size: 1.15rem; }
+  a { color: #c8102e; }
+  .updated { color: #666; font-size: 0.9rem; }
+  ul { padding-left: 1.2rem; }
+  code { background: #f3f3f3; padding: 0.1rem 0.3rem; border-radius: 4px; font-size: 0.9em; }
+  nav { margin-top: 2.5rem; font-size: 0.9rem; }
+</style>
+</head>
+<body>
+  <h1>JC Video Factory Privacy Policy</h1>
+  <p class="updated">Last updated: June 5, 2026</p>
+
+  <p>JC Video Factory is a local personal tool. It uses TikTok OAuth only so the
+     authorized user can publish finished videos to their own TikTok account.</p>
+
+  <h2>Information Used</h2>
+  <p>The tool may store the following data locally on the user's machine:</p>
+  <ul>
+    <li>TikTok OAuth access and refresh tokens in <code>storage/tiktok_token.json</code>.</li>
+    <li>Temporary OAuth state values in <code>storage/tiktok_oauth_state.json</code>.</li>
+    <li>Generated videos, captions, scripts, and task metadata under <code>storage/tasks/</code>.</li>
+    <li>Draft story text in the browser's local storage.</li>
+  </ul>
+  <p>The tool may request TikTok creator information, such as nickname, privacy options,
+     interaction settings, and maximum allowed video duration, so the publishing screen
+     can show the correct options.</p>
+
+  <h2>How Information Is Used</h2>
+  <p>Data is used only to generate videos, show TikTok publishing options, upload the
+     selected finished MP4, and check publish status. The tool does not sell personal
+     information or share TikTok tokens with third parties.</p>
+
+  <h2>Data Control</h2>
+  <p>The user controls the local files created by the tool. To disconnect TikTok, delete
+     <code>storage/tiktok_token.json</code> and revoke the app from the TikTok account
+     settings. Generated videos and task metadata can be deleted from <code>storage/tasks/</code>.</p>
+
+  <h2>Contact</h2>
+  <p>For questions about this local tool, contact the owner of the repository or app
+     deployment where this page is published (johnchrisley4@gmail.com).</p>
+
+  <nav><a href="/legal">← Back to JC Video Factory</a> · <a href="/legal/terms">Terms of Service</a></nav>
+</body>
+</html>
