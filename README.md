@@ -140,6 +140,35 @@ PORT=8081 ./creator.sh       # use a different port
 HOST=0.0.0.0 ./creator.sh    # bind on all network interfaces
 ```
 
+### 🔒 Securing TikTok before public hosting
+
+The TikTok connection (OAuth) is stored **server-wide, not per device** — once the
+server is connected to a TikTok account, **any** device that opens the hosted creator
+console can see and use that same account. Before you expose the console over a tunnel
+or public URL, protect the creator/TikTok functions with an owner access key.
+
+Set a long, private key in **either** of these ways (the env var wins):
+
+```toml
+# config.toml
+[app]
+creator_access_key = "your-long-private-key"
+```
+
+```bash
+export CREATOR_ACCESS_KEY="your-long-private-key"
+```
+
+When a key is set:
+
+- The creator console shows TikTok in a **locked** state until you unlock it.
+- The owner enters the key **once per browser** (it's stored locally and sent in the
+  `X-Creator-Access-Key` header on subsequent requests).
+- Gated endpoints: **TikTok OAuth/status, publish, inbox upload, and the TikTok
+  schedule-related endpoints**.
+
+Leave the key empty for purely local use to keep the console open with no gate.
+
 ## 🔧 Troubleshooting
 
 <details>
