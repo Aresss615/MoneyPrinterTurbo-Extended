@@ -145,6 +145,7 @@ def tiktok_auth_url(request: Request):
     return utils.get_response(200, {"auth_url": url})
 
 
+@router.get("/callback", summary="TikTok OAuth redirect callback")
 @router.get("/tiktok/callback", summary="TikTok OAuth redirect callback")
 def tiktok_callback(request: Request, code: str = "", state: str = "", error: str = ""):
     if error:
@@ -174,6 +175,7 @@ def tiktok_callback(request: Request, code: str = "", state: str = "", error: st
     )
 
 
+@router.get("/callback/{verification_filename}")
 @router.get("/tiktok/callback/{verification_filename}")
 def tiktok_verification_file(request: Request, verification_filename: str):
     return _serve_verification_file(verification_filename)

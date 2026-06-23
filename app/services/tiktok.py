@@ -65,7 +65,7 @@ def _client_secret() -> str:
 def _redirect_uri() -> str:
     return (
         config.tiktok.get("redirect_uri")
-        or "https://your-cloudflare-tunnel.example.com/api/v1/tiktok/callback"
+        or "https://your-cloudflare-tunnel.example.com/api/v1/callback"
     ).strip()
 
 

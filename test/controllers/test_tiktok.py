@@ -264,6 +264,20 @@ class TestTikTokApi(unittest.TestCase):
         self.assertIn("TikTok connected", response.text)
         exchange.assert_called_once_with("abc")
 
+    def test_clean_callback_path_exchanges_code_when_oauth_state_is_valid(self):
+        with patch.object(
+            tiktok, "consume_oauth_state", return_value=True, create=True
+        ), patch.object(
+            tiktok, "exchange_code_for_token", return_value={"open_id": "open-1"}
+        ) as exchange:
+            response = self.client.get(
+                "/api/v1/callback?code=abc&state=valid-state"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("TikTok connected", response.text)
+        exchange.assert_called_once_with("abc")
+
     def test_serves_tiktok_site_verification_file_under_callback_path(self):
         response = self.client.get(
             "/api/v1/tiktok/callback/"

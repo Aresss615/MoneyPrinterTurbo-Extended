@@ -233,7 +233,7 @@ client_key = ""
 client_secret = ""
 # Must exactly match an HTTPS redirect URI registered on your TikTok app.
 # For local testing, point a Cloudflare Tunnel/ngrok URL at http://127.0.0.1:8080.
-redirect_uri = "https://app.example.com/api/v1/tiktok/callback"
+redirect_uri = "https://app.example.com/api/v1/callback"
 # Unaudited apps can only post privately (SELF_ONLY). After TikTok audits your
 # app you may change this to PUBLIC_TO_EVERYONE (no code change needed).
 privacy_level = "SELF_ONLY"

@@ -55,6 +55,21 @@ class TestTikTokService(unittest.TestCase):
         self.assertIn("response_type=code", url)
         self.assertIn("redirect_uri=https%3A%2F%2Fdev.example.com%2Fcb", url)
 
+    def test_build_authorize_url_defaults_to_clean_callback_path(self):
+        from app.services import tiktok
+
+        with patch.object(
+            tiktok.config,
+            "tiktok",
+            {"client_key": "abc"},
+        ):
+            url = tiktok.build_authorize_url("xyz-state")
+
+        self.assertIn(
+            "redirect_uri=https%3A%2F%2Fyour-cloudflare-tunnel.example.com%2Fapi%2Fv1%2Fcallback",
+            url,
+        )
+
     def test_build_upload_plan_splits_current_89mb_outputs(self):
         from app.services import tiktok
 
