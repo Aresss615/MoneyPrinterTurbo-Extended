@@ -9,7 +9,7 @@ Resources:
 
 from fastapi import APIRouter
 
-from app.controllers.v1 import creator, facebook, llm, tiktok, video
+from app.controllers.v1 import creator, facebook, legal, llm, tiktok, video
 
 root_api_router = APIRouter()
 # v1
@@ -18,3 +18,5 @@ root_api_router.include_router(creator.router)
 root_api_router.include_router(llm.router)
 root_api_router.include_router(tiktok.router)
 root_api_router.include_router(facebook.router)
+# Public legal pages at clean /legal/* URLs (no /api/v1 prefix, no 'tiktok')
+root_api_router.include_router(legal.router)
