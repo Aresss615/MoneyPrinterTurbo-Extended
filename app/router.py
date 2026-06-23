@@ -9,7 +9,7 @@ Resources:
 
 from fastapi import APIRouter
 
-from app.controllers.v1 import creator, llm, tiktok, video
+from app.controllers.v1 import creator, facebook, llm, tiktok, video
 
 root_api_router = APIRouter()
 # v1
@@ -17,3 +17,4 @@ root_api_router.include_router(video.router)
 root_api_router.include_router(creator.router)
 root_api_router.include_router(llm.router)
 root_api_router.include_router(tiktok.router)
+root_api_router.include_router(facebook.router)
